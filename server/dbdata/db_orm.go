@@ -4,6 +4,7 @@ import (
 	"errors"
 	"reflect"
 
+	"github.com/bjdgyc/anylink/base"
 	"xorm.io/xorm"
 )
 
@@ -62,7 +63,10 @@ func One(fieldName string, value interface{}, data interface{}) error {
 }
 
 func CountAll(data interface{}) int {
-	n, _ := xdb.Count(data)
+	n, err := xdb.Count(data)
+	if err != nil {
+		base.Error("CountAll 查询失败:", err)
+	}
 	return int(n)
 }
 

@@ -14,9 +14,6 @@ import (
 
 // Login 登陆接口
 func Login(w http.ResponseWriter, r *http.Request) {
-	// TODO 调试信息输出
-	// hd, _ := httputil.DumpRequest(r, true)
-	// fmt.Println("DumpRequest: ", string(hd))
 
 	_ = r.ParseForm()
 	adminUser := r.PostFormValue("admin_user")

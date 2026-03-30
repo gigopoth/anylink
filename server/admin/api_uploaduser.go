@@ -20,7 +20,10 @@ import (
 
 func UserUpload(w http.ResponseWriter, r *http.Request) {
 	// 限制上传文件总大小为 8MB
-	r.ParseMultipartForm(8 << 20)
+	if err := r.ParseMultipartForm(8 << 20); err != nil {
+		RespError(w, RespInternalErr, "请求解析失败")
+		return
+	}
 	file, header, err := r.FormFile("file")
 	if err != nil {
 		RespError(w, RespInternalErr, "文件解析失败")

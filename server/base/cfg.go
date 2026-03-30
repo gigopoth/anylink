@@ -111,29 +111,23 @@ type ServerConfig struct {
 
 func initServerCfg() {
 
-	// TODO 取消绝对地址转换
-	// sf, _ := filepath.Abs(cfgFile)
-	// base := filepath.Dir(sf)
-
-	// 转换成绝对路径
-	// Cfg.DbFile = getAbsPath(base, Cfg.DbFile)
-	// Cfg.CertFile = getAbsPath(base, Cfg.CertFile)
-	// Cfg.CertKey = getAbsPath(base, Cfg.CertKey)
-	// Cfg.UiPath = getAbsPath(base, Cfg.UiPath)
-	// Cfg.FilesPath = getAbsPath(base, Cfg.FilesPath)
-	// Cfg.LogPath = getAbsPath(base, Cfg.LogPath)
+	// 配置路径使用相对路径，需要在程序所在目录运行
 
 	if Cfg.AdminPass == defaultPwd {
 		// 自动生成随机管理员密码，避免使用默认密码
-		randPwd, _ := utils.RandSecret(16, 20)
-		randPwd = strings.Trim(randPwd, "=")
-		hashedPwd, err := utils.PasswordHash(randPwd)
-		if err == nil {
-			Cfg.AdminPass = hashedPwd
-			fmt.Fprintf(os.Stderr, "=== 已自动生成管理员密码: %s ===\n", randPwd)
-			fmt.Fprintln(os.Stderr, "=== 请及时保存并通过配置文件设置admin_pass ===")
-		} else {
+		randPwd, err := utils.RandSecret(16, 20)
+		if err != nil {
 			fmt.Fprintln(os.Stderr, "=== 使用默认的admin_pass有安全风险，请设置新的admin_pass ===")
+		} else {
+			randPwd = strings.Trim(randPwd, "=")
+			hashedPwd, err := utils.PasswordHash(randPwd)
+			if err == nil {
+				Cfg.AdminPass = hashedPwd
+				fmt.Fprintf(os.Stderr, "=== 已自动生成管理员密码: %s ===\n", randPwd)
+				fmt.Fprintln(os.Stderr, "=== 请及时保存并通过配置文件设置admin_pass ===")
+			} else {
+				fmt.Fprintln(os.Stderr, "=== 使用默认的admin_pass有安全风险，请设置新的admin_pass ===")
+			}
 		}
 	}
 

@@ -360,7 +360,7 @@ func GetCertificateBySNI(commonName string) (*tls.Certificate, error) {
 			return cert, nil
 		}
 	}
-	// TODO 默认证书 兼容不支持 SNI 的客户端
+	// 回退到默认证书，兼容不支持 SNI 的客户端
 	if cert, ok := nameToCertificate["default"]; ok {
 		return cert, nil
 	}
@@ -377,7 +377,7 @@ func buildNameToCertificate(cert *tls.Certificate) {
 	ntcMux.Lock()
 	defer ntcMux.Unlock()
 
-	// TODO 设置默认证书
+	// 设置默认证书（用于不支持 SNI 的客户端回退）
 	nameToCertificate["default"] = cert
 
 	x509Cert, err := x509.ParseCertificate(cert.Certificate[0])

@@ -72,8 +72,7 @@ func payloadOutDtls(cSess *sessdata.ConnSession, dSess *sessdata.DtlsSession, pl
 
 // Acl规则校验
 func checkLinkAcl(group *dbdata.Group, pl *sessdata.Payload) bool {
-	if pl.LType == sessdata.LTypeIPData && pl.PType == 0x00 && len(group.LinkAcl) > 0 {
-	} else {
+	if !(pl.LType == sessdata.LTypeIPData && pl.PType == 0x00 && len(group.LinkAcl) > 0) {
 		return true
 	}
 

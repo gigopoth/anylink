@@ -142,6 +142,8 @@ func checkLocalUser(name, pwd, group string, ext map[string]interface{}) error {
 			v.PinCode = hashedPwd
 			if err := Set(v); err != nil {
 				base.Error("自动迁移密码失败:", name, err)
+			} else {
+				base.Info("密码已自动迁移至bcrypt:", name)
 			}
 		}
 		return nil

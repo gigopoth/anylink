@@ -34,7 +34,7 @@ func HttpAddHeader(w http.ResponseWriter, key string, value string) {
 }
 
 func LinkTunnel(w http.ResponseWriter, r *http.Request) {
-	// TODO 调试信息输出
+	// Trace 级别日志输出请求详情
 	if base.GetLogLevel() == base.LogLevelTrace {
 		hd, _ := httputil.DumpRequest(r, true)
 		base.Trace("LinkTunnel: ", string(hd))
