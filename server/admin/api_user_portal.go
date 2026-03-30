@@ -2,11 +2,13 @@ package admin
 
 import (
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"sync"
 	"time"
@@ -15,6 +17,8 @@ import (
 	"github.com/bjdgyc/anylink/dbdata"
 	"github.com/bjdgyc/anylink/pkg/utils"
 	"github.com/bjdgyc/anylink/sessdata"
+	"github.com/skip2/go-qrcode"
+	"github.com/xlzd/gotp"
 )
 
 // User portal: self-service API for VPN end users (separate from admin)
@@ -85,6 +89,9 @@ func UserPortalLogin(w http.ResponseWriter, r *http.Request) {
 
 	lm.UpdateLoginStatus(loginReq.Username, r.RemoteAddr, true)
 
+	// Check if password is expired
+	passwordExpired := dbdata.IsPasswordExpired(user)
+
 	// Generate user-scoped JWT
 	expiresAt := time.Now().Unix() + userJwtExpiry
 	jwtData := map[string]interface{}{
@@ -98,9 +105,10 @@ func UserPortalLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := map[string]interface{}{
-		"token":      tokenString,
-		"username":   user.Username,
-		"expires_at": expiresAt,
+		"token":            tokenString,
+		"username":         user.Username,
+		"expires_at":       expiresAt,
+		"password_expired": passwordExpired,
 	}
 	RespSucess(w, data)
 }
@@ -121,17 +129,23 @@ func UserPortalProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Return safe profile (no password hash, no OTP secret)
+	passwordExpired := dbdata.IsPasswordExpired(user)
 	profile := map[string]interface{}{
-		"id":         user.Id,
-		"username":   user.Username,
-		"nickname":   user.Nickname,
-		"email":      user.Email,
-		"groups":     user.Groups,
-		"status":     user.Status,
-		"limittime":  user.LimitTime,
-		"disable_otp": user.DisableOtp,
-		"created_at": user.CreatedAt,
-		"updated_at": user.UpdatedAt,
+		"id":                user.Id,
+		"username":          user.Username,
+		"nickname":          user.Nickname,
+		"email":             user.Email,
+		"groups":            user.Groups,
+		"status":            user.Status,
+		"limittime":         user.LimitTime,
+		"disable_otp":       user.DisableOtp,
+		"otp_bound":         user.OtpSecret != "",
+		"has_recovery_codes": len(user.OtpRecoveryCodes) > 0,
+		"recovery_codes_count": len(user.OtpRecoveryCodes),
+		"password_expired":  passwordExpired,
+		"password_changed_at": user.PasswordChangedAt,
+		"created_at":        user.CreatedAt,
+		"updated_at":        user.UpdatedAt,
 	}
 	RespSucess(w, profile)
 }
@@ -211,10 +225,17 @@ func UserPortalChangePassword(w http.ResponseWriter, r *http.Request) {
 	} else {
 		user.PinCode = req.NewPassword
 	}
-	user.UpdatedAt = time.Now()
+	now := time.Now()
+	user.PasswordChangedAt = &now
+	user.UpdatedAt = now
 	if err := dbdata.Set(user); err != nil {
 		RespError(w, RespInternalErr, "密码修改失败")
 		return
+	}
+
+	// Send password change notification email
+	if user.Email != "" {
+		go sendPasswordChangeNotification(user)
 	}
 
 	RespSucess(w, "密码修改成功")
@@ -455,7 +476,9 @@ func UserPortalResetPassword(w http.ResponseWriter, r *http.Request) {
 	} else {
 		user.PinCode = req.NewPassword
 	}
-	user.UpdatedAt = time.Now()
+	now := time.Now()
+	user.PasswordChangedAt = &now
+	user.UpdatedAt = now
 	if err := dbdata.Set(user); err != nil {
 		RespError(w, RespInternalErr, "密码重置失败")
 		return
@@ -508,4 +531,542 @@ func portalAuthMiddleware(next http.Handler) http.Handler {
 // getUsernameFromCtx extracts the username from the portal auth context
 func getUsernameFromCtx(r *http.Request) string {
 	return r.Header.Get("X-Portal-User")
+}
+
+// verifyUserPassword verifies a password against the stored hash or plaintext
+func verifyUserPassword(password string, user *dbdata.User) bool {
+	if len(user.PinCode) != 60 {
+		return password == user.PinCode
+	}
+	return utils.PasswordVerify(password, user.PinCode)
+}
+
+// UserPortalDisconnectSession allows users to force-disconnect one of their own sessions
+func UserPortalDisconnectSession(w http.ResponseWriter, r *http.Request) {
+	username := getUsernameFromCtx(r)
+	if username == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		RespError(w, RespInternalErr, err)
+		return
+	}
+	defer r.Body.Close()
+
+	var req struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		RespError(w, RespParamErr, "请求格式错误")
+		return
+	}
+
+	if req.Token == "" {
+		RespError(w, RespParamErr, "会话令牌不能为空")
+		return
+	}
+
+	// Verify the session belongs to this user
+	datas := sessdata.GetOnlineSess("username", username, false)
+	found := false
+	for _, d := range datas {
+		if d.Token == req.Token {
+			found = true
+			break
+		}
+	}
+	if !found {
+		RespError(w, RespParamErr, "未找到该会话或不属于当前用户")
+		return
+	}
+
+	sessdata.CloseSess(req.Token, dbdata.UserLogoutAdmin)
+	base.Info("用户", username, "通过门户主动断开了会话:", req.Token)
+	RespSucess(w, "会话已断开")
+}
+
+// UserPortalGetOtpStatus returns OTP status for the current user
+func UserPortalGetOtpStatus(w http.ResponseWriter, r *http.Request) {
+	username := getUsernameFromCtx(r)
+	if username == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	user := &dbdata.User{}
+	err := dbdata.One("Username", username, user)
+	if err != nil {
+		RespError(w, RespInternalErr, "用户不存在")
+		return
+	}
+
+	data := map[string]interface{}{
+		"otp_enabled":         !user.DisableOtp,
+		"otp_bound":           user.OtpSecret != "",
+		"has_recovery_codes":  len(user.OtpRecoveryCodes) > 0,
+		"recovery_codes_count": len(user.OtpRecoveryCodes),
+	}
+	RespSucess(w, data)
+}
+
+// UserPortalBindOtp generates a new OTP secret and returns QR code for binding
+func UserPortalBindOtp(w http.ResponseWriter, r *http.Request) {
+	username := getUsernameFromCtx(r)
+	if username == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	user := &dbdata.User{}
+	err := dbdata.One("Username", username, user)
+	if err != nil {
+		RespError(w, RespInternalErr, "用户不存在")
+		return
+	}
+
+	// Generate new OTP secret
+	newSecret := gotp.RandomSecret(32)
+
+	// Generate QR code - use email if available, username as fallback
+	issuer := url.QueryEscape(base.Cfg.Issuer)
+	accountName := user.Email
+	if accountName == "" {
+		accountName = user.Username
+	}
+	qrStr := fmt.Sprintf("otpauth://totp/%s:%s?issuer=%s&secret=%s", issuer, accountName, issuer, newSecret)
+	qr, err := qrcode.New(qrStr, qrcode.High)
+	if err != nil {
+		RespError(w, RespInternalErr, "生成二维码失败")
+		return
+	}
+
+	imgData, err := qr.PNG(300)
+	if err != nil {
+		RespError(w, RespInternalErr, "生成二维码图片失败")
+		return
+	}
+
+	// Store the new secret temporarily - user must verify before it's saved
+	pendingOtpMux.Lock()
+	if len(pendingOtpSecrets) >= maxPendingOtpSecrets {
+		pendingOtpMux.Unlock()
+		RespError(w, RespInternalErr, "系统繁忙，请稍后重试")
+		return
+	}
+	pendingOtpSecrets[username] = pendingOtpInfo{
+		Secret:    newSecret,
+		ExpiresAt: time.Now().Add(pendingOtpExpiry),
+	}
+	pendingOtpMux.Unlock()
+
+	data := map[string]interface{}{
+		"qr_code": base64.StdEncoding.EncodeToString(imgData),
+		"secret":  newSecret,
+	}
+	RespSucess(w, data)
+}
+
+// Constants for pending OTP management
+const (
+	maxPendingOtpSecrets  = 10000
+	pendingOtpExpiry      = 10 * time.Minute
+	pendingOtpCleanupFreq = 2 * time.Minute
+)
+
+// Pending OTP secrets storage
+var (
+	pendingOtpSecrets = make(map[string]pendingOtpInfo)
+	pendingOtpMux     sync.Mutex
+)
+
+type pendingOtpInfo struct {
+	Secret    string
+	ExpiresAt time.Time
+}
+
+func init() {
+	// Cleanup expired pending OTP secrets periodically
+	go func() {
+		ticker := time.NewTicker(pendingOtpCleanupFreq)
+		defer ticker.Stop()
+		for range ticker.C {
+			pendingOtpMux.Lock()
+			now := time.Now()
+			for k, v := range pendingOtpSecrets {
+				if now.After(v.ExpiresAt) {
+					delete(pendingOtpSecrets, k)
+				}
+			}
+			pendingOtpMux.Unlock()
+		}
+	}()
+}
+
+// UserPortalConfirmOtp verifies and saves the OTP binding
+func UserPortalConfirmOtp(w http.ResponseWriter, r *http.Request) {
+	username := getUsernameFromCtx(r)
+	if username == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		RespError(w, RespInternalErr, err)
+		return
+	}
+	defer r.Body.Close()
+
+	var req struct {
+		OtpCode string `json:"otp_code"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		RespError(w, RespParamErr, "请求格式错误")
+		return
+	}
+
+	if req.OtpCode == "" {
+		RespError(w, RespParamErr, "验证码不能为空")
+		return
+	}
+
+	// Get pending secret
+	pendingOtpMux.Lock()
+	pending, exists := pendingOtpSecrets[username]
+	if !exists || time.Now().After(pending.ExpiresAt) {
+		if exists {
+			delete(pendingOtpSecrets, username)
+		}
+		pendingOtpMux.Unlock()
+		RespError(w, RespParamErr, "OTP绑定已过期，请重新生成")
+		return
+	}
+	pendingOtpMux.Unlock()
+
+	// Verify OTP code with the pending secret
+	totp := gotp.NewDefaultTOTP(pending.Secret)
+	if !totp.Verify(req.OtpCode, time.Now().Unix()) {
+		RespError(w, RespParamErr, "验证码错误，请重试")
+		return
+	}
+
+	// Save the OTP secret to user
+	user := &dbdata.User{}
+	err = dbdata.One("Username", username, user)
+	if err != nil {
+		RespError(w, RespInternalErr, "用户不存在")
+		return
+	}
+
+	user.OtpSecret = pending.Secret
+	user.DisableOtp = false
+	// Generate recovery codes
+	recoveryCodes := dbdata.GenerateRecoveryCodes(10)
+	user.OtpRecoveryCodes = recoveryCodes
+	user.UpdatedAt = time.Now()
+	if err := dbdata.Set(user); err != nil {
+		RespError(w, RespInternalErr, "保存OTP配置失败")
+		return
+	}
+
+	// Clean up pending secret
+	pendingOtpMux.Lock()
+	delete(pendingOtpSecrets, username)
+	pendingOtpMux.Unlock()
+
+	base.Info("用户", username, "通过门户绑定了OTP")
+
+	data := map[string]interface{}{
+		"message":        "OTP绑定成功",
+		"recovery_codes": recoveryCodes,
+	}
+	RespSucess(w, data)
+}
+
+// UserPortalResetOtp resets the user's OTP (requires password verification)
+func UserPortalResetOtp(w http.ResponseWriter, r *http.Request) {
+	username := getUsernameFromCtx(r)
+	if username == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		RespError(w, RespInternalErr, err)
+		return
+	}
+	defer r.Body.Close()
+
+	var req struct {
+		Password string `json:"password"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		RespError(w, RespParamErr, "请求格式错误")
+		return
+	}
+
+	if req.Password == "" {
+		RespError(w, RespParamErr, "密码不能为空")
+		return
+	}
+
+	user := &dbdata.User{}
+	err = dbdata.One("Username", username, user)
+	if err != nil {
+		RespError(w, RespInternalErr, "用户不存在")
+		return
+	}
+
+	// Verify password
+	if !verifyUserPassword(req.Password, user) {
+		RespError(w, RespUserOrPassErr, "密码错误")
+		return
+	}
+
+	// Reset OTP - clear secret to avoid inconsistent state
+	user.OtpSecret = ""
+	user.DisableOtp = true
+	user.OtpRecoveryCodes = nil
+	user.UpdatedAt = time.Now()
+	if err := dbdata.Set(user); err != nil {
+		RespError(w, RespInternalErr, "重置OTP失败")
+		return
+	}
+
+	base.Info("用户", username, "通过门户重置了OTP")
+	RespSucess(w, "OTP已重置，请重新绑定")
+}
+
+// UserPortalRegenerateRecoveryCodes regenerates recovery codes (requires password verification)
+func UserPortalRegenerateRecoveryCodes(w http.ResponseWriter, r *http.Request) {
+	username := getUsernameFromCtx(r)
+	if username == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		RespError(w, RespInternalErr, err)
+		return
+	}
+	defer r.Body.Close()
+
+	var req struct {
+		Password string `json:"password"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		RespError(w, RespParamErr, "请求格式错误")
+		return
+	}
+
+	if req.Password == "" {
+		RespError(w, RespParamErr, "密码不能为空")
+		return
+	}
+
+	user := &dbdata.User{}
+	err = dbdata.One("Username", username, user)
+	if err != nil {
+		RespError(w, RespInternalErr, "用户不存在")
+		return
+	}
+
+	// Verify password
+	if !verifyUserPassword(req.Password, user) {
+		RespError(w, RespUserOrPassErr, "密码错误")
+		return
+	}
+
+	if user.DisableOtp {
+		RespError(w, RespParamErr, "OTP未启用，请先绑定OTP")
+		return
+	}
+
+	// Generate new recovery codes
+	recoveryCodes := dbdata.GenerateRecoveryCodes(10)
+	user.OtpRecoveryCodes = recoveryCodes
+	user.UpdatedAt = time.Now()
+	if err := dbdata.Set(user); err != nil {
+		RespError(w, RespInternalErr, "生成恢复码失败")
+		return
+	}
+
+	base.Info("用户", username, "通过门户重新生成了恢复码")
+	data := map[string]interface{}{
+		"recovery_codes": recoveryCodes,
+	}
+	RespSucess(w, data)
+}
+
+// UserPortalBandwidthStats returns the user's current session bandwidth statistics
+func UserPortalBandwidthStats(w http.ResponseWriter, r *http.Request) {
+	username := getUsernameFromCtx(r)
+	if username == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	datas := sessdata.GetOnlineSess("username", username, false)
+	var sessions []map[string]interface{}
+	for _, d := range datas {
+		sessions = append(sessions, map[string]interface{}{
+			"token":              d.Token,
+			"ip":                 d.Ip,
+			"remote_addr":       d.RemoteAddr,
+			"transport_protocol": d.TransportProtocol,
+			"bandwidth_up":       d.BandwidthUp,
+			"bandwidth_down":     d.BandwidthDown,
+			"bandwidth_up_all":   d.BandwidthUpAll,
+			"bandwidth_down_all": d.BandwidthDownAll,
+			"last_login":         d.LastLogin,
+		})
+	}
+
+	data := map[string]interface{}{
+		"count":    len(sessions),
+		"sessions": sessions,
+	}
+	RespSucess(w, data)
+}
+
+// UserPortalGetRoutes returns the effective routes and DNS config for the user's groups
+func UserPortalGetRoutes(w http.ResponseWriter, r *http.Request) {
+	username := getUsernameFromCtx(r)
+	if username == "" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	user := &dbdata.User{}
+	err := dbdata.One("Username", username, user)
+	if err != nil {
+		RespError(w, RespInternalErr, "用户不存在")
+		return
+	}
+
+	// Check if user has a personal policy
+	policy := &dbdata.Policy{}
+	hasPolicy := false
+	if err := dbdata.One("Username", username, policy); err == nil && policy.Status == 1 {
+		hasPolicy = true
+	}
+
+	var groupConfigs []map[string]interface{}
+	for _, groupName := range user.Groups {
+		group := &dbdata.Group{}
+		if err := dbdata.One("Name", groupName, group); err != nil {
+			continue
+		}
+
+		config := map[string]interface{}{
+			"group_name":    group.Name,
+			"client_dns":    group.ClientDns,
+			"split_dns":     group.SplitDns,
+			"route_include": group.RouteInclude,
+			"route_exclude": group.RouteExclude,
+			"allow_lan":     group.AllowLan,
+		}
+		groupConfigs = append(groupConfigs, config)
+	}
+
+	data := map[string]interface{}{
+		"groups":     groupConfigs,
+		"has_policy": hasPolicy,
+	}
+
+	// If user has personal policy, include it
+	if hasPolicy {
+		data["policy"] = map[string]interface{}{
+			"client_dns":          policy.ClientDns,
+			"route_include":       policy.RouteInclude,
+			"route_exclude":       policy.RouteExclude,
+			"ds_exclude_domains":  policy.DsExcludeDomains,
+			"ds_include_domains":  policy.DsIncludeDomains,
+			"allow_lan":           policy.AllowLan,
+		}
+	}
+
+	RespSucess(w, data)
+}
+
+// sendPasswordChangeNotification sends email notification when password is changed
+func sendPasswordChangeNotification(user *dbdata.User) {
+	htmlBody := fmt.Sprintf(`
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>密码修改通知</title></head>
+<body>
+<p>%s 您好,</p>
+<p>您的 <b>%s</b> VPN 账号密码已于 %s 成功修改。</p>
+<p>如果这不是您本人的操作，请立即联系管理员。</p>
+</body>
+</html>`, user.Nickname, base.Cfg.Issuer, time.Now().Format("2006-01-02 15:04:05"))
+
+	subject := fmt.Sprintf("%s - 密码修改通知", base.Cfg.Issuer)
+	if err := SendMail(subject, user.Email, htmlBody, nil); err != nil {
+		base.Error("发送密码修改通知邮件失败:", err)
+	}
+}
+
+// SendLoginAlertEmail sends email notification for login from new IP/device
+func SendLoginAlertEmail(username, remoteAddr, deviceType, platformVersion string) {
+	user := &dbdata.User{}
+	err := dbdata.One("Username", username, user)
+	if err != nil || user.Email == "" {
+		return
+	}
+
+	htmlBody := fmt.Sprintf(`
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>登录提醒</title></head>
+<body>
+<p>%s 您好,</p>
+<p>您的 <b>%s</b> VPN 账号于 %s 从以下位置登录：</p>
+<p>
+    IP地址: <b>%s</b><br/>
+    设备类型: <b>%s</b><br/>
+    系统版本: <b>%s</b><br/>
+</p>
+<p>如果这不是您本人的操作，请立即修改密码并联系管理员。</p>
+</body>
+</html>`, user.Nickname, base.Cfg.Issuer, time.Now().Format("2006-01-02 15:04:05"),
+		remoteAddr, deviceType, platformVersion)
+
+	subject := fmt.Sprintf("%s - 登录提醒", base.Cfg.Issuer)
+	if err := SendMail(subject, user.Email, htmlBody, nil); err != nil {
+		base.Error("发送登录提醒邮件失败:", err)
+	}
+}
+
+// SendAccountLockedEmail sends email notification when account is locked
+func SendAccountLockedEmail(username string) {
+	user := &dbdata.User{}
+	err := dbdata.One("Username", username, user)
+	if err != nil || user.Email == "" {
+		return
+	}
+
+	htmlBody := fmt.Sprintf(`
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>账号锁定通知</title></head>
+<body>
+<p>%s 您好,</p>
+<p>您的 <b>%s</b> VPN 账号因连续多次登录失败，已被临时锁定。</p>
+<p>锁定时间: %s</p>
+<p>账号将在一段时间后自动解锁。如需立即解锁，请联系管理员。</p>
+<p>如果这些登录尝试不是您本人的操作，请在解锁后立即修改密码。</p>
+</body>
+</html>`, user.Nickname, base.Cfg.Issuer, time.Now().Format("2006-01-02 15:04:05"))
+
+	subject := fmt.Sprintf("%s - 账号锁定通知", base.Cfg.Issuer)
+	if err := SendMail(subject, user.Email, htmlBody, nil); err != nil {
+		base.Error("发送账号锁定通知邮件失败:", err)
+	}
 }

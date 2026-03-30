@@ -31,15 +31,17 @@ type User struct {
 	Nickname string `json:"nickname" xorm:"varchar(255)"`
 	Email    string `json:"email" xorm:"varchar(255)"`
 	// Password  string    `json:"password"`
-	PinCode    string     `json:"pin_code" xorm:"varchar(64)"`
-	LimitTime  *time.Time `json:"limittime,omitempty" xorm:"Datetime limittime"` // 值为null时，前端不显示
-	OtpSecret  string     `json:"otp_secret" xorm:"varchar(255)"`
-	DisableOtp bool       `json:"disable_otp" xorm:"Bool"` // 禁用otp
-	Groups     []string   `json:"groups" xorm:"Text"`
-	Status     int8       `json:"status" xorm:"Int"` // 1正常
-	SendEmail  bool       `json:"send_email" xorm:"Bool"`
-	CreatedAt  time.Time  `json:"created_at" xorm:"DateTime created"`
-	UpdatedAt  time.Time  `json:"updated_at" xorm:"DateTime updated"`
+	PinCode          string     `json:"pin_code" xorm:"varchar(64)"`
+	LimitTime        *time.Time `json:"limittime,omitempty" xorm:"Datetime limittime"` // 值为null时，前端不显示
+	OtpSecret        string     `json:"otp_secret" xorm:"varchar(255)"`
+	DisableOtp       bool       `json:"disable_otp" xorm:"Bool"`                              // 禁用otp
+	OtpRecoveryCodes []string   `json:"otp_recovery_codes,omitempty" xorm:"Text"`             // OTP备用恢复码
+	Groups           []string   `json:"groups" xorm:"Text"`
+	Status           int8       `json:"status" xorm:"Int"`                                    // 1正常
+	SendEmail        bool       `json:"send_email" xorm:"Bool"`
+	PasswordChangedAt *time.Time `json:"password_changed_at,omitempty" xorm:"Datetime"`       // 密码最后修改时间
+	CreatedAt        time.Time  `json:"created_at" xorm:"DateTime created"`
+	UpdatedAt        time.Time  `json:"updated_at" xorm:"DateTime updated"`
 }
 
 type UserActLog struct {
