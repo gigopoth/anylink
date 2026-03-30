@@ -57,7 +57,7 @@ func SetPolicy(p *Policy) error {
 			}
 
 			if strings.Split(ipMask, "/")[0] != ipNet.IP.String() {
-				errMsg := fmt.Sprintf("RouteInclude 错误: 网络地址错误，建议： %s 改为 %s", v.Val, ipNet)
+				errMsg := fmt.Sprintf("RouteExclude 错误: 网络地址错误，建议： %s 改为 %s", v.Val, ipNet)
 				return errors.New(errMsg)
 			}
 			v.IpMask = ipMask
@@ -100,6 +100,13 @@ func SetPolicy(p *Policy) error {
 	if err != nil {
 		return errors.New("排除域名有误：" + err.Error())
 	}
+
+	// 转换ACL数据
+	linkAcl, err := validateLinkAcl(p.LinkAcl)
+	if err != nil {
+		return err
+	}
+	p.LinkAcl = linkAcl
 
 	p.UpdatedAt = time.Now()
 	if p.Id > 0 {
