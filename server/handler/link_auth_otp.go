@@ -158,6 +158,9 @@ func CreateSession(w http.ResponseWriter, r *http.Request, authSession *AuthSess
 	w.WriteHeader(http.StatusOK)
 	tplRequest(tpl_complete, w, rd)
 	base.Info("login", cr.Auth.Username, cr.UserAgent)
+
+	// Send login alert email asynchronously
+	go admin.SendLoginAlertEmail(cr.Auth.Username, cr.RemoteAddr, ua.DeviceType, ua.PlatformVersion)
 }
 
 func LinkAuth_otp(w http.ResponseWriter, r *http.Request) {

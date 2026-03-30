@@ -43,6 +43,7 @@ type SettingPasswordPolicy struct {
 	RequireLower bool `json:"require_lower"` // 要求包含小写字母
 	RequireDigit bool `json:"require_digit"` // 要求包含数字
 	RequireSpec  bool `json:"require_spec"`  // 要求包含特殊字符
+	PasswordMaxAge int `json:"password_max_age"` // 密码最大有效天数(0=不限制)
 }
 
 // GetPasswordPolicy retrieves the password policy from the database, initializing defaults if not found

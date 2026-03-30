@@ -139,8 +139,19 @@ func checkLocalUser(name, pwd, group string, ext map[string]interface{}) error {
 		if !v.DisableOtp {
 			pinCode = pwd[:pl-6]
 			otp := pwd[pl-6:]
+			// First try regular OTP, then try recovery code
 			if !CheckOtp(name, otp, v.OtpSecret) {
-				return fmt.Errorf("%s %s", name, "动态码错误")
+				// Try recovery code (8 chars instead of 6-digit OTP)
+				if len(pwd) > 8 {
+					pinCode = pwd[:pl-8]
+					recoveryCode := pwd[pl-8:]
+					if !VerifyRecoveryCode(v, recoveryCode) {
+						return fmt.Errorf("%s %s", name, "动态码错误")
+					}
+					base.Info("用户", name, "使用了恢复码登录")
+				} else {
+					return fmt.Errorf("%s %s", name, "动态码错误")
+				}
 			}
 		}
 	}
@@ -165,6 +176,11 @@ func checkLocalUser(name, pwd, group string, ext map[string]interface{}) error {
 	// 密文密码
 	if !utils.PasswordVerify(pinCode, v.PinCode) {
 		return fmt.Errorf("%s %s", name, "密码错误")
+	}
+
+	// Check password expiry
+	if IsPasswordExpired(v) {
+		return fmt.Errorf("%s %s", name, "密码已过期，请通过用户门户修改密码")
 	}
 
 	return nil
@@ -254,4 +270,43 @@ func (u *User) BeforeUpdate() {
 		}
 		u.PinCode = hashedPassword
 	}
+}
+
+// GenerateRecoveryCodes generates a set of one-time backup recovery codes for OTP
+func GenerateRecoveryCodes(count int) []string {
+	codes := make([]string, count)
+	for i := 0; i < count; i++ {
+		codes[i] = utils.RandomRunes(8)
+	}
+	return codes
+}
+
+// VerifyRecoveryCode checks a recovery code and removes it if valid (one-time use)
+func VerifyRecoveryCode(user *User, code string) bool {
+	for i, c := range user.OtpRecoveryCodes {
+		if c == code {
+			// Remove the used code
+			user.OtpRecoveryCodes = append(user.OtpRecoveryCodes[:i], user.OtpRecoveryCodes[i+1:]...)
+			user.UpdatedAt = time.Now()
+			if err := Set(user); err != nil {
+				base.Error("移除已使用的恢复码失败:", err)
+			}
+			return true
+		}
+	}
+	return false
+}
+
+// IsPasswordExpired checks if the user's password has exceeded the max age
+func IsPasswordExpired(user *User) bool {
+	policy := GetPasswordPolicy()
+	if policy.PasswordMaxAge <= 0 {
+		return false
+	}
+	if user.PasswordChangedAt == nil {
+		// If no password change record, treat as expired to force change
+		return true
+	}
+	maxAge := time.Duration(policy.PasswordMaxAge) * 24 * time.Hour
+	return time.Since(*user.PasswordChangedAt) > maxAge
 }

@@ -343,7 +343,13 @@ func (lm *LockManager) UpdateGlobalUserLock(username string, now time.Time, succ
 		lm.userLocks[username] = state
 	}
 
+	wasLocked := state.Locked
 	lm.UpdateLockState(state, now, success, base.Cfg.MaxGlobalUserBanCount, base.Cfg.GlobalUserLockTime)
+
+	// Send lock notification email if just got locked
+	if !wasLocked && state.Locked {
+		go SendAccountLockedEmail(username)
+	}
 }
 
 // 更新单个用户的 IP 锁定状态
