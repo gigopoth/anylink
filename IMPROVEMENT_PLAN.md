@@ -248,8 +248,8 @@
 
 | 序号 | 问题 | 优先级 | 状态 |
 |------|------|--------|------|
-| 1.1 | LDAP TLS InsecureSkipVerify | 🔴 关键 | ⬜ 待修复 |
-| 1.2 | SMTP TLS InsecureSkipVerify | 🔴 关键 | ⬜ 待修复 |
+| 1.1 | LDAP TLS InsecureSkipVerify | 🔴 关键 | ✅ 已修复 |
+| 1.2 | SMTP TLS InsecureSkipVerify | 🔴 关键 | ✅ 已修复 |
 | 1.3 | XML 模板 XSS | 🔴 关键 | ⬜ 待修复 |
 | 1.4 | 请求体无大小限制 | 🔴 关键 | ✅ 已修复 |
 | 1.5 | TODO 严重问题 | 🔴 关键 | ⬜ 待修复 |

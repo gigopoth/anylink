@@ -84,9 +84,7 @@ func SendMail(subject, to, htmlBody string, attach *mail.File) error {
 	// Timeout for send the data and wait respond
 	server.SendTimeout = 10 * time.Second
 
-	// Set TLSConfig to provide custom TLS configuration. For example,
-	// to skip TLS verification (useful for testing):
-	server.TLSConfig = &tls.Config{InsecureSkipVerify: true}
+	server.TLSConfig = &tls.Config{InsecureSkipVerify: dataSmtp.InsecureSkipVerify}
 
 	// SMTP client
 	smtpClient, err := server.Connect()
