@@ -92,7 +92,7 @@ func TestSetGroupLinkAcl(t *testing.T) {
 	}
 	err = SetGroup(&g6)
 	ast.NotNil(err)
-	ast.Contains(err.Error(), "GroupLinkAcl 错误")
+	ast.Contains(err.Error(), "LinkAcl 错误")
 
 	// 无效端口格式应返回错误
 	g7 := Group{

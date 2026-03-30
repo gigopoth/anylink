@@ -151,7 +151,7 @@ func SetGroup(g *Group) error {
 			}
 
 			if strings.Split(ipMask, "/")[0] != ipNet.IP.String() {
-				errMsg := fmt.Sprintf("RouteInclude 错误: 网络地址错误，建议： %s 改为 %s", v.Val, ipNet)
+				errMsg := fmt.Sprintf("RouteExclude 错误: 网络地址错误，建议： %s 改为 %s", v.Val, ipNet)
 				return errors.New(errMsg)
 			}
 
@@ -160,86 +160,11 @@ func SetGroup(g *Group) error {
 		}
 	}
 	g.RouteExclude = routeExclude
-	// 转换数据
-	linkAcl := []GroupLinkAcl{}
-	for _, v := range g.LinkAcl {
-		if v.Val != "" {
-			_, ipNet, err := parseIpNet(v.Val)
-			if err != nil {
-				return errors.New("GroupLinkAcl 错误" + err.Error())
-			}
-			v.IpNet = ipNet
-
-			// 设置协议数据
-			switch v.Protocol {
-			case ALL, "":
-				v.Protocol = ALL
-			case TCP:
-				v.IpProto = waterutil.TCP
-			case UDP:
-				v.IpProto = waterutil.UDP
-			case ICMP:
-				v.IpProto = waterutil.ICMP
-			default:
-				return fmt.Errorf("GroupLinkAcl 错误: 不支持的协议类型 '%s', 仅支持 all/tcp/udp/icmp", v.Protocol)
-			}
-
-			portsStr := v.Port
-			v.Port = strings.TrimSpace(portsStr)
-			// switch vp := v.Port.(type) {
-			// case float64:
-			// 	portsStr = strconv.Itoa(int(vp))
-			// case string:
-			// 	portsStr = vp
-			// }
-
-			if regexp.MustCompile(`^\d{1,5}(-\d{1,5})?(,\d{1,5}(-\d{1,5})?)*$`).MatchString(portsStr) {
-				ports := map[uint16]int8{}
-				for _, p := range strings.Split(portsStr, ",") {
-					if p == "" {
-						continue
-					}
-					if regexp.MustCompile(`^\d{1,5}-\d{1,5}$`).MatchString(p) {
-						rp := strings.Split(p, "-")
-						// portfrom, err := strconv.Atoi(rp[0])
-						portfrom, err := strconv.ParseUint(rp[0], 10, 16)
-						if err != nil {
-							return errors.New("端口:" + rp[0] + " 格式错误, " + err.Error())
-						}
-						// portto, err := strconv.Atoi(rp[1])
-						portto, err := strconv.ParseUint(rp[1], 10, 16)
-						if err != nil {
-							return errors.New("端口:" + rp[1] + " 格式错误, " + err.Error())
-						}
-						if portfrom > portto {
-							return fmt.Errorf("端口范围错误: 起始端口 %d 大于结束端口 %d", portfrom, portto)
-						}
-						// 端口范围超过1000时，使用端口0（通配符）代替，避免内存浪费
-						if portto-portfrom > 1000 {
-							ports[0] = 1
-						} else {
-							for i := portfrom; i <= portto; i++ {
-								ports[uint16(i)] = 1
-							}
-						}
-
-					} else {
-						port, err := strconv.ParseUint(p, 10, 16)
-						if err != nil {
-							return errors.New("端口:" + p + " 格式错误, " + err.Error())
-						}
-						ports[uint16(port)] = 1
-					}
-				}
-				v.Ports = ports
-				linkAcl = append(linkAcl, v)
-			} else {
-				return errors.New("端口: " + portsStr + " 格式错误,请用逗号分隔的端口,比如: 22,80,443 连续端口用-,比如:1234-5678")
-			}
-
-		}
+	// 转换ACL数据
+	linkAcl, err := validateLinkAcl(g.LinkAcl)
+	if err != nil {
+		return err
 	}
-
 	g.LinkAcl = linkAcl
 
 	// DNS 判断
@@ -265,7 +190,6 @@ func SetGroup(g *Group) error {
 	for _, v := range g.SplitDns {
 		v.Val = strings.TrimSpace(v.Val)
 		if v.Val != "" {
-			ValidateDomainName(v.Val)
 			if !ValidateDomainName(v.Val) {
 				return errors.New("域名 错误")
 			}
@@ -331,11 +255,81 @@ func SetGroup(g *Group) error {
 
 func ContainsInPorts(ports map[uint16]int8, port uint16) bool {
 	_, ok := ports[port]
-	if ok {
-		return true
-	} else {
-		return false
+	return ok
+}
+
+// validateLinkAcl 校验并转换ACL规则数据
+func validateLinkAcl(acls []GroupLinkAcl) ([]GroupLinkAcl, error) {
+	linkAcl := []GroupLinkAcl{}
+	for _, v := range acls {
+		if v.Val != "" {
+			_, ipNet, err := parseIpNet(v.Val)
+			if err != nil {
+				return nil, errors.New("LinkAcl 错误" + err.Error())
+			}
+			v.IpNet = ipNet
+
+			// 设置协议数据
+			switch v.Protocol {
+			case ALL, "":
+				v.Protocol = ALL
+			case TCP:
+				v.IpProto = waterutil.TCP
+			case UDP:
+				v.IpProto = waterutil.UDP
+			case ICMP:
+				v.IpProto = waterutil.ICMP
+			default:
+				return nil, fmt.Errorf("LinkAcl 错误: 不支持的协议类型 '%s', 仅支持 all/tcp/udp/icmp", v.Protocol)
+			}
+
+			portsStr := v.Port
+			v.Port = strings.TrimSpace(portsStr)
+
+			if regexp.MustCompile(`^\d{1,5}(-\d{1,5})?(,\d{1,5}(-\d{1,5})?)*$`).MatchString(portsStr) {
+				ports := map[uint16]int8{}
+				for _, ps := range strings.Split(portsStr, ",") {
+					if ps == "" {
+						continue
+					}
+					if regexp.MustCompile(`^\d{1,5}-\d{1,5}$`).MatchString(ps) {
+						rp := strings.Split(ps, "-")
+						portfrom, err := strconv.ParseUint(rp[0], 10, 16)
+						if err != nil {
+							return nil, errors.New("端口:" + rp[0] + " 格式错误, " + err.Error())
+						}
+						portto, err := strconv.ParseUint(rp[1], 10, 16)
+						if err != nil {
+							return nil, errors.New("端口:" + rp[1] + " 格式错误, " + err.Error())
+						}
+						if portfrom > portto {
+							return nil, fmt.Errorf("端口范围错误: 起始端口 %d 大于结束端口 %d", portfrom, portto)
+						}
+						// 端口范围超过1000时，使用端口0（通配符）代替，避免内存浪费
+						if portto-portfrom > 1000 {
+							ports[0] = 1
+						} else {
+							for i := portfrom; i <= portto; i++ {
+								ports[uint16(i)] = 1
+							}
+						}
+
+					} else {
+						port, err := strconv.ParseUint(ps, 10, 16)
+						if err != nil {
+							return nil, errors.New("端口:" + ps + " 格式错误, " + err.Error())
+						}
+						ports[uint16(port)] = 1
+					}
+				}
+				v.Ports = ports
+				linkAcl = append(linkAcl, v)
+			} else {
+				return nil, errors.New("端口: " + portsStr + " 格式错误,请用逗号分隔的端口,比如: 22,80,443 连续端口用-,比如:1234-5678")
+			}
+		}
 	}
+	return linkAcl, nil
 }
 
 func GroupAuthLogin(name, pwd string, authData map[string]interface{}) error {
