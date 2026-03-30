@@ -116,3 +116,45 @@ func SetOtherAuditLogEdit(w http.ResponseWriter, r *http.Request) {
 	}
 	RespSucess(w, data)
 }
+
+// SetPasswordPolicy returns the current password policy
+func SetPasswordPolicy(w http.ResponseWriter, r *http.Request) {
+	data := &dbdata.SettingPasswordPolicy{}
+	setOtherGet(data, w)
+}
+
+// SetPasswordPolicyEdit updates the password policy
+func SetPasswordPolicyEdit(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		RespError(w, RespInternalErr, err)
+		return
+	}
+	defer r.Body.Close()
+
+	data := &dbdata.SettingPasswordPolicy{}
+	err = json.Unmarshal(body, data)
+	if err != nil {
+		RespError(w, RespInternalErr, err)
+		return
+	}
+
+	// Validate policy settings
+	if data.MinLength < 6 {
+		data.MinLength = 6 // 密码最少6个字符
+	}
+	if data.MaxLength <= 0 || data.MaxLength > 128 {
+		data.MaxLength = 64
+	}
+	if data.MinLength > data.MaxLength {
+		RespError(w, RespParamErr, errors.New("最小长度不能大于最大长度"))
+		return
+	}
+
+	err = dbdata.SettingSet(data)
+	if err != nil {
+		RespError(w, RespInternalErr, err)
+		return
+	}
+	RespSucess(w, data)
+}

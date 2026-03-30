@@ -37,6 +37,20 @@ func SetUser(v *User) error {
 	// 自动生成密码
 	if len(planPass) < 6 {
 		planPass = utils.RandomRunes(8)
+	} else {
+		// 验证密码强度策略
+		policy := GetPasswordPolicy()
+		policyConfig := utils.PasswordPolicyConfig{
+			MinLength:    policy.MinLength,
+			MaxLength:    policy.MaxLength,
+			RequireUpper: policy.RequireUpper,
+			RequireLower: policy.RequireLower,
+			RequireDigit: policy.RequireDigit,
+			RequireSpec:  policy.RequireSpec,
+		}
+		if err := utils.ValidatePassword(planPass, policyConfig); err != nil {
+			return fmt.Errorf("密码强度不符合要求: %v", err)
+		}
 	}
 	v.PinCode = planPass
 

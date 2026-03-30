@@ -36,12 +36,33 @@ func StartAdmin() {
 		w.Write([]byte("ok"))
 	}).Name("index")
 
+	// 健康检查和指标端点(无需认证)
+	r.HandleFunc("/healthz", HealthCheck).Name("index")
+	r.HandleFunc("/metrics", Metrics).Name("index")
+	r.HandleFunc("/metrics/prometheus", PrometheusMetrics).Name("index")
+
 	r.Handle("/", http.RedirectHandler("/ui/", http.StatusFound)).Name("index")
 	r.PathPrefix("/ui/").Handler(
 		// http.StripPrefix("/ui/", http.FileServer(http.Dir(base.Cfg.UiPath))),
 		http.FileServer(http.FS(UiData)),
 	).Name("static")
 	r.HandleFunc("/base/login", Login).Name("login")
+
+	// 用户自助服务门户 API (无需管理员认证，使用用户自身JWT)
+	portal := r.PathPrefix("/portal").Subrouter()
+	portal.Use(recoverHttp)
+	// 公开端点(无需认证)
+	portal.HandleFunc("/login", UserPortalLogin).Name("login")
+	portal.HandleFunc("/password/request_reset", UserPortalRequestPasswordReset).Name("login")
+	portal.HandleFunc("/password/reset", UserPortalResetPassword).Name("login")
+	portal.HandleFunc("/password/policy", UserPortalGetPasswordPolicy).Name("login")
+	// 需要用户认证的端点
+	portalAuth := portal.PathPrefix("").Subrouter()
+	portalAuth.Use(portalAuthMiddleware)
+	portalAuth.HandleFunc("/profile", UserPortalProfile)
+	portalAuth.HandleFunc("/password/change", UserPortalChangePassword)
+	portalAuth.HandleFunc("/login_history", UserPortalLoginHistory)
+	portalAuth.HandleFunc("/active_sessions", UserPortalActiveSessions)
 
 	r.HandleFunc("/set/home", SetHome)
 	r.HandleFunc("/set/system", SetSystem)
@@ -52,6 +73,8 @@ func StartAdmin() {
 	r.HandleFunc("/set/other/smtp/edit", SetOtherSmtpEdit)
 	r.HandleFunc("/set/other/audit_log", SetOtherAuditLog)
 	r.HandleFunc("/set/other/audit_log/edit", SetOtherAuditLogEdit)
+	r.HandleFunc("/set/other/password_policy", SetPasswordPolicy)
+	r.HandleFunc("/set/other/password_policy/edit", SetPasswordPolicyEdit)
 	r.HandleFunc("/set/audit/list", SetAuditList)
 	r.HandleFunc("/set/audit/export", SetAuditExport)
 	r.HandleFunc("/set/audit/act_log_list", UserActLogList)
