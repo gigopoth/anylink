@@ -35,6 +35,32 @@ type SettingOther struct {
 	AccountMail string `json:"account_mail"`
 }
 
+// SettingPasswordPolicy defines the password strength requirements
+type SettingPasswordPolicy struct {
+	MinLength    int  `json:"min_length"`    // 最小密码长度(默认8)
+	MaxLength    int  `json:"max_length"`    // 最大密码长度(默认64)
+	RequireUpper bool `json:"require_upper"` // 要求包含大写字母
+	RequireLower bool `json:"require_lower"` // 要求包含小写字母
+	RequireDigit bool `json:"require_digit"` // 要求包含数字
+	RequireSpec  bool `json:"require_spec"`  // 要求包含特殊字符
+}
+
+// GetPasswordPolicy retrieves the password policy from the database, initializing defaults if not found
+func GetPasswordPolicy() SettingPasswordPolicy {
+	data := SettingPasswordPolicy{}
+	err := SettingGet(&data)
+	if err == nil {
+		return data
+	}
+	// Fallback defaults for existing installations without policy in DB
+	// MinLength=6 matches the original minimum to maintain backward compatibility
+	// New installations get MinLength=8 from addInitData()
+	return SettingPasswordPolicy{
+		MinLength: 6,
+		MaxLength: 64,
+	}
+}
+
 func StructName(data interface{}) string {
 	ref := reflect.ValueOf(data)
 	s := &ref

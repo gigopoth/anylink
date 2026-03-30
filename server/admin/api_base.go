@@ -137,3 +137,16 @@ func recoverHttp(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
+
+// limitBodyMiddleware limits the request body size to prevent DoS attacks
+// Default limit is 1MB for most endpoints
+const maxBodySize = 1 << 20 // 1 MB
+
+func limitBodyMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Body != nil {
+			r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
