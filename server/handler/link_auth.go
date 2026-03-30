@@ -37,7 +37,8 @@ func LinkAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, err := io.ReadAll(r.Body)
+	// 限制请求体大小为 1MB，防止内存耗尽攻击
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		return
