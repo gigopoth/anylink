@@ -124,7 +124,17 @@ func initServerCfg() {
 	// Cfg.LogPath = getAbsPath(base, Cfg.LogPath)
 
 	if Cfg.AdminPass == defaultPwd {
-		fmt.Fprintln(os.Stderr, "=== 使用默认的admin_pass有安全风险，请设置新的admin_pass ===")
+		// 自动生成随机管理员密码，避免使用默认密码
+		randPwd, _ := utils.RandSecret(16, 20)
+		randPwd = strings.Trim(randPwd, "=")
+		hashedPwd, err := utils.PasswordHash(randPwd)
+		if err == nil {
+			Cfg.AdminPass = hashedPwd
+			fmt.Fprintf(os.Stderr, "=== 已自动生成管理员密码: %s ===\n", randPwd)
+			fmt.Fprintln(os.Stderr, "=== 请及时保存并通过配置文件设置admin_pass ===")
+		} else {
+			fmt.Fprintln(os.Stderr, "=== 使用默认的admin_pass有安全风险，请设置新的admin_pass ===")
+		}
 	}
 
 	if Cfg.JwtSecret == defaultJwt {

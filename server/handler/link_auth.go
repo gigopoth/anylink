@@ -158,17 +158,27 @@ const (
 	tpl_otp
 )
 
+// xmlEscape returns the XML-escaped form of s to prevent XSS injection.
+func xmlEscape(s string) string {
+	buf := new(bytes.Buffer)
+	_ = xml.EscapeText(buf, []byte(s))
+	return buf.String()
+}
+
 func tplRequest(typ int, w io.Writer, data RequestData) {
+	// Escape user-controllable fields to prevent XML injection / XSS
+	data.Group = xmlEscape(data.Group)
+	data.Error = xmlEscape(data.Error)
+	data.Banner = xmlEscape(data.Banner)
+	for i, g := range data.Groups {
+		data.Groups[i] = xmlEscape(g)
+	}
+
 	switch typ {
 	case tpl_request:
 		t, _ := template.New("auth_request").Parse(auth_request)
 		_ = t.Execute(w, data)
 	case tpl_complete:
-		if data.Banner != "" {
-			buf := new(bytes.Buffer)
-			_ = xml.EscapeText(buf, []byte(data.Banner))
-			data.Banner = buf.String()
-		}
 		t, _ := template.New("auth_complete").Parse(auth_complete)
 		_ = t.Execute(w, data)
 	case tpl_otp:
