@@ -12,6 +12,8 @@ import (
 )
 
 func CustomCert(w http.ResponseWriter, r *http.Request) {
+	// 限制证书上传总大小为 1MB
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	cert, _, err := r.FormFile("cert")
 	if err != nil {
 		RespError(w, RespInternalErr, err)
@@ -28,7 +30,7 @@ func CustomCert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer certFile.Close()
-	if _, err := io.Copy(certFile, cert); err != nil {
+	if _, err := io.Copy(certFile, io.LimitReader(cert, 1<<20)); err != nil {
 		RespError(w, RespInternalErr, err)
 		return
 	}
@@ -38,7 +40,7 @@ func CustomCert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer keyFile.Close()
-	if _, err := io.Copy(keyFile, key); err != nil {
+	if _, err := io.Copy(keyFile, io.LimitReader(key, 1<<20)); err != nil {
 		RespError(w, RespInternalErr, err)
 		return
 	}
@@ -69,7 +71,8 @@ func CreatCert(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	body, err := io.ReadAll(r.Body)
+	// 限制请求体大小为 1MB，防止内存耗尽攻击
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {
 		RespError(w, RespInternalErr, err)
 		return

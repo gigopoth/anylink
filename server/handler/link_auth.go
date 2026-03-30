@@ -21,7 +21,7 @@ var (
 )
 
 func LinkAuth(w http.ResponseWriter, r *http.Request) {
-	// TODO 调试信息输出
+	// Trace 级别日志输出请求详情
 	if base.GetLogLevel() == base.LogLevelTrace {
 		hd, _ := httputil.DumpRequest(r, true)
 		base.Trace("LinkAuth: ", string(hd))
@@ -37,7 +37,8 @@ func LinkAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, err := io.ReadAll(r.Body)
+	// 限制请求体大小为 1MB，防止内存耗尽攻击
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		return
@@ -98,7 +99,7 @@ func LinkAuth(w http.ResponseWriter, r *http.Request) {
 		ClientRequest: cr,
 		UserActLog:    ua,
 	}
-	// TODO 用户密码校验
+	// 用户密码校验
 	ext := map[string]interface{}{"mac_addr": cr.MacAddressList.MacAddress}
 	err = dbdata.CheckUser(cr.Auth.Username, cr.Auth.Password, cr.GroupSelect, ext)
 	if err != nil {
@@ -157,22 +158,40 @@ const (
 	tpl_otp
 )
 
+// xmlEscape returns the XML-escaped form of s to prevent XSS injection.
+func xmlEscape(s string) string {
+	buf := new(bytes.Buffer)
+	_ = xml.EscapeText(buf, []byte(s))
+	return buf.String()
+}
+
+// 预编译模板，启动时即报错
+var (
+	tplAuthRequest  = template.Must(template.New("auth_request").Parse(auth_request))
+	tplAuthComplete = template.Must(template.New("auth_complete").Parse(auth_complete))
+	tplAuthOtp      = template.Must(template.New("auth_otp").Parse(auth_otp))
+)
+
 func tplRequest(typ int, w io.Writer, data RequestData) {
+	// Escape user-controllable fields to prevent XML injection / XSS
+	data.Group = xmlEscape(data.Group)
+	data.Error = xmlEscape(data.Error)
+	data.Banner = xmlEscape(data.Banner)
+	for i, g := range data.Groups {
+		data.Groups[i] = xmlEscape(g)
+	}
+
+	var err error
 	switch typ {
 	case tpl_request:
-		t, _ := template.New("auth_request").Parse(auth_request)
-		_ = t.Execute(w, data)
+		err = tplAuthRequest.Execute(w, data)
 	case tpl_complete:
-		if data.Banner != "" {
-			buf := new(bytes.Buffer)
-			_ = xml.EscapeText(buf, []byte(data.Banner))
-			data.Banner = buf.String()
-		}
-		t, _ := template.New("auth_complete").Parse(auth_complete)
-		_ = t.Execute(w, data)
+		err = tplAuthComplete.Execute(w, data)
 	case tpl_otp:
-		t, _ := template.New("auth_otp").Parse(auth_otp)
-		_ = t.Execute(w, data)
+		err = tplAuthOtp.Execute(w, data)
+	}
+	if err != nil {
+		base.Error("模板渲染失败:", err)
 	}
 }
 

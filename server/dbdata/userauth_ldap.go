@@ -15,14 +15,15 @@ import (
 )
 
 type AuthLdap struct {
-	Addr        string `json:"addr"`
-	Tls         bool   `json:"tls"`
-	BindName    string `json:"bind_name"`
-	BindPwd     string `json:"bind_pwd"`
-	BaseDn      string `json:"base_dn"`
-	ObjectClass string `json:"object_class"`
-	SearchAttr  string `json:"search_attr"`
-	MemberOf    string `json:"member_of"`
+	Addr               string `json:"addr"`
+	Tls                bool   `json:"tls"`
+	InsecureSkipVerify bool   `json:"insecure_skip_verify"`
+	BindName           string `json:"bind_name"`
+	BindPwd            string `json:"bind_pwd"`
+	BaseDn             string `json:"base_dn"`
+	ObjectClass        string `json:"object_class"`
+	SearchAttr         string `json:"search_attr"`
+	MemberOf           string `json:"member_of"`
 }
 
 func init() {
@@ -91,7 +92,7 @@ func (auth AuthLdap) checkUser(name, pwd string, g *Group, ext map[string]interf
 	}
 	defer l.Close()
 	if auth.Tls {
-		err = l.StartTLS(&tls.Config{InsecureSkipVerify: true})
+		err = l.StartTLS(&tls.Config{InsecureSkipVerify: auth.InsecureSkipVerify})
 		if err != nil {
 			return fmt.Errorf("%s LDAP TLS连接失败 %s", name, err.Error())
 		}

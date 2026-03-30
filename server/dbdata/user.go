@@ -97,9 +97,6 @@ func CheckUser(name, pwd, group string, ext map[string]interface{}) error {
 
 // 验证本地用户登录信息
 func checkLocalUser(name, pwd, group string, ext map[string]interface{}) error {
-	// TODO 严重问题
-	// return nil
-
 	pl := len(pwd)
 	if name == "" || pl < 6 {
 		return fmt.Errorf("%s %s", name, "密码错误")
@@ -107,12 +104,15 @@ func checkLocalUser(name, pwd, group string, ext map[string]interface{}) error {
 	v := &User{}
 	err := One("Username", name, v)
 	if err != nil || v.Status != 1 {
+		// 内部日志记录详细原因
 		switch v.Status {
 		case 0:
-			return fmt.Errorf("%s %s", name, "用户不存在或用户已停用")
+			base.Warn(name, "用户不存在或用户已停用")
 		case 2:
-			return fmt.Errorf("%s %s", name, "用户已过期")
+			base.Warn(name, "用户已过期")
 		}
+		// 对外统一返回通用错误信息，防止用户名枚举
+		return fmt.Errorf("%s %s", name, "用户名或密码错误")
 	}
 	// 判断用户组信息
 	if !utils.InArrStr(v.Groups, group) {
@@ -136,6 +136,15 @@ func checkLocalUser(name, pwd, group string, ext map[string]interface{}) error {
 	if len(v.PinCode) != 60 {
 		if pinCode != v.PinCode {
 			return fmt.Errorf("%s %s", name, "密码错误")
+		}
+		// 明文密码验证通过后，自动迁移为 bcrypt 存储
+		if hashedPwd, err := utils.PasswordHash(pinCode); err == nil {
+			v.PinCode = hashedPwd
+			if err := Set(v); err != nil {
+				base.Error("自动迁移密码失败:", name, err)
+			} else {
+				base.Info("密码已自动迁移至bcrypt:", name)
+			}
 		}
 		return nil
 	}
@@ -194,6 +203,12 @@ func CheckOtp(name, otp, secret string) bool {
 	// 令牌只能使用一次
 	if _, ok := userOtp[key]; ok {
 		// 已经存在
+		return false
+	}
+
+	// 防止无界增长，超过上限时拒绝新的 OTP 验证
+	const maxOtpEntries = 10000
+	if len(userOtp) >= maxOtpEntries {
 		return false
 	}
 	userOtp[key] = time.Now()

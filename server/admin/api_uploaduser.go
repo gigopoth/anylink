@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -18,13 +19,31 @@ import (
 )
 
 func UserUpload(w http.ResponseWriter, r *http.Request) {
-	r.ParseMultipartForm(8 << 20)
+	// 限制上传文件总大小为 8MB
+	if err := r.ParseMultipartForm(8 << 20); err != nil {
+		RespError(w, RespInternalErr, "请求解析失败")
+		return
+	}
 	file, header, err := r.FormFile("file")
-	if err != nil || !strings.Contains(header.Filename, ".xlsx") || !strings.Contains(header.Filename, ".xls") {
-		RespError(w, RespInternalErr, "文件解析失败:仅支持xlsx或xls文件")
+	if err != nil {
+		RespError(w, RespInternalErr, "文件解析失败")
 		return
 	}
 	defer file.Close()
+
+	// 使用 filepath.Ext 严格校验文件扩展名
+	ext := strings.ToLower(filepath.Ext(header.Filename))
+	if ext != ".xlsx" && ext != ".xls" {
+		RespError(w, RespInternalErr, "文件格式不正确:仅支持xlsx或xls文件")
+		return
+	}
+
+	// 限制文件大小为 8MB
+	const maxUploadSize = 8 << 20
+	if header.Size > maxUploadSize {
+		RespError(w, RespInternalErr, "文件大小超过限制(最大8MB)")
+		return
+	}
 
 	// go/path-injection
 	// base.Cfg.FilesPath 可以直接对外访问，不能上传文件到此
@@ -36,7 +55,12 @@ func UserUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer newFile.Close()
 
-	io.Copy(newFile, file)
+	_, err = io.Copy(newFile, io.LimitReader(file, maxUploadSize))
+	if err != nil {
+		RespError(w, RespInternalErr, "文件写入失败:", err)
+		os.Remove(fileName)
+		return
+	}
 	if err = UploadUser(newFile.Name()); err != nil {
 		RespError(w, RespInternalErr, err)
 		os.Remove(fileName)
