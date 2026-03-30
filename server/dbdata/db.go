@@ -133,6 +133,16 @@ func addInitData() error {
 		return err
 	}
 
+	// SettingPasswordPolicy - 默认密码策略
+	pwdPolicy := &SettingPasswordPolicy{
+		MinLength: 8,
+		MaxLength: 64,
+	}
+	err = SettingSessAdd(sess, pwdPolicy)
+	if err != nil {
+		return err
+	}
+
 	// Install
 	install := &SettingInstall{Installed: true}
 	err = SettingSessAdd(sess, install)

@@ -13,7 +13,9 @@ var (
 	limitMux    = sync.Mutex{}
 )
 
-func LimitClient(user string, close bool) bool {
+// LimitClient checks and updates the client connection count.
+// maxUserClient overrides the global limit when > 0 (per-group setting).
+func LimitClient(user string, close bool, maxUserClient ...int) bool {
 	limitMux.Lock()
 	defer limitMux.Unlock()
 
@@ -35,7 +37,11 @@ func LimitClient(user string, close bool) bool {
 	}
 
 	// 超出同一个用户限制
-	if c >= base.Cfg.MaxUserClient {
+	userMax := base.Cfg.MaxUserClient
+	if len(maxUserClient) > 0 && maxUserClient[0] > 0 {
+		userMax = maxUserClient[0] // 使用组级别的限制
+	}
+	if c >= userMax {
 		return false
 	}
 

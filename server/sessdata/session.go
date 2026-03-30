@@ -167,12 +167,22 @@ func (s *Session) NewConn() *ConnSession {
 	macHw := s.MacHw
 	username := s.Username
 	uniqueMac := s.UniqueMac
+	groupName := s.Group
 	s.mux.RUnlock()
 	if active {
 		s.CSess.Close()
 	}
 
-	limit := LimitClient(username, false)
+	// 查询group信息(提前查询以获取组级限制)
+	group := &dbdata.Group{}
+	err := dbdata.One("Name", groupName, group)
+	if err != nil {
+		base.Error(err)
+		return nil
+	}
+
+	// 使用组级别的用户连接限制(如果设置了)
+	limit := LimitClient(username, false, group.MaxUserClient)
 	if !limit {
 		base.Warn("limit is full", username)
 		return nil
@@ -180,14 +190,6 @@ func (s *Session) NewConn() *ConnSession {
 	ip := AcquireIp(username, macAddr, uniqueMac)
 	if ip == nil {
 		LimitClient(username, true)
-		return nil
-	}
-
-	// 查询group信息
-	group := &dbdata.Group{}
-	err := dbdata.One("Name", s.Group, group)
-	if err != nil {
-		base.Error(err)
 		return nil
 	}
 
