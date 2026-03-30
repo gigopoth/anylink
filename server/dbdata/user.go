@@ -141,8 +141,9 @@ func checkLocalUser(name, pwd, group string, ext map[string]interface{}) error {
 			otp := pwd[pl-6:]
 			// First try regular OTP, then try recovery code
 			if !CheckOtp(name, otp, v.OtpSecret) {
-				// Try recovery code (8 chars instead of 6-digit OTP)
-				if len(pwd) > 8 {
+				// Try recovery code (8 chars)
+				// Password must be at least 6 (min password) + 8 (recovery code) chars
+				if pl >= 14 {
 					pinCode = pwd[:pl-8]
 					recoveryCode := pwd[pl-8:]
 					if !VerifyRecoveryCode(v, recoveryCode) {
@@ -282,10 +283,12 @@ func GenerateRecoveryCodes(count int) []string {
 }
 
 // VerifyRecoveryCode checks a recovery code and removes it if valid (one-time use)
+// Note: This is called within the checkLocalUser flow which is serialized per-user
+// by the lock manager, so concurrent access is already handled at a higher level.
 func VerifyRecoveryCode(user *User, code string) bool {
 	for i, c := range user.OtpRecoveryCodes {
 		if c == code {
-			// Remove the used code
+			// Remove the used code (atomic DB update)
 			user.OtpRecoveryCodes = append(user.OtpRecoveryCodes[:i], user.OtpRecoveryCodes[i+1:]...)
 			user.UpdatedAt = time.Now()
 			if err := Set(user); err != nil {
@@ -304,8 +307,10 @@ func IsPasswordExpired(user *User) bool {
 		return false
 	}
 	if user.PasswordChangedAt == nil {
-		// If no password change record, treat as expired to force change
-		return true
+		// For existing users without PasswordChangedAt, use CreatedAt as fallback
+		// to avoid forcing all users to change password immediately on upgrade
+		maxAge := time.Duration(policy.PasswordMaxAge) * 24 * time.Hour
+		return time.Since(user.CreatedAt) > maxAge
 	}
 	maxAge := time.Duration(policy.PasswordMaxAge) * 24 * time.Hour
 	return time.Since(*user.PasswordChangedAt) > maxAge

@@ -533,6 +533,14 @@ func getUsernameFromCtx(r *http.Request) string {
 	return r.Header.Get("X-Portal-User")
 }
 
+// verifyUserPassword verifies a password against the stored hash or plaintext
+func verifyUserPassword(password string, user *dbdata.User) bool {
+	if len(user.PinCode) != 60 {
+		return password == user.PinCode
+	}
+	return utils.PasswordVerify(password, user.PinCode)
+}
+
 // UserPortalDisconnectSession allows users to force-disconnect one of their own sessions
 func UserPortalDisconnectSession(w http.ResponseWriter, r *http.Request) {
 	username := getUsernameFromCtx(r)
@@ -622,9 +630,13 @@ func UserPortalBindOtp(w http.ResponseWriter, r *http.Request) {
 	// Generate new OTP secret
 	newSecret := gotp.RandomSecret(32)
 
-	// Generate QR code
+	// Generate QR code - use email if available, username as fallback
 	issuer := url.QueryEscape(base.Cfg.Issuer)
-	qrStr := fmt.Sprintf("otpauth://totp/%s:%s?issuer=%s&secret=%s", issuer, user.Email, issuer, newSecret)
+	accountName := user.Email
+	if accountName == "" {
+		accountName = user.Username
+	}
+	qrStr := fmt.Sprintf("otpauth://totp/%s:%s?issuer=%s&secret=%s", issuer, accountName, issuer, newSecret)
 	qr, err := qrcode.New(qrStr, qrcode.High)
 	if err != nil {
 		RespError(w, RespInternalErr, "生成二维码失败")
@@ -638,16 +650,15 @@ func UserPortalBindOtp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Store the new secret temporarily - user must verify before it's saved
-	// We use the reset token mechanism to store pending OTP secrets
 	pendingOtpMux.Lock()
-	if len(pendingOtpSecrets) >= 10000 {
+	if len(pendingOtpSecrets) >= maxPendingOtpSecrets {
 		pendingOtpMux.Unlock()
 		RespError(w, RespInternalErr, "系统繁忙，请稍后重试")
 		return
 	}
 	pendingOtpSecrets[username] = pendingOtpInfo{
 		Secret:    newSecret,
-		ExpiresAt: time.Now().Add(10 * time.Minute),
+		ExpiresAt: time.Now().Add(pendingOtpExpiry),
 	}
 	pendingOtpMux.Unlock()
 
@@ -657,6 +668,13 @@ func UserPortalBindOtp(w http.ResponseWriter, r *http.Request) {
 	}
 	RespSucess(w, data)
 }
+
+// Constants for pending OTP management
+const (
+	maxPendingOtpSecrets  = 10000
+	pendingOtpExpiry      = 10 * time.Minute
+	pendingOtpCleanupFreq = 2 * time.Minute
+)
 
 // Pending OTP secrets storage
 var (
@@ -670,9 +688,9 @@ type pendingOtpInfo struct {
 }
 
 func init() {
-	// Cleanup expired pending OTP secrets every 2 minutes
+	// Cleanup expired pending OTP secrets periodically
 	go func() {
-		ticker := time.NewTicker(2 * time.Minute)
+		ticker := time.NewTicker(pendingOtpCleanupFreq)
 		defer ticker.Stop()
 		for range ticker.C {
 			pendingOtpMux.Lock()
@@ -804,20 +822,13 @@ func UserPortalResetOtp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify password
-	if len(user.PinCode) != 60 {
-		if req.Password != user.PinCode {
-			RespError(w, RespUserOrPassErr, "密码错误")
-			return
-		}
-	} else {
-		if !utils.PasswordVerify(req.Password, user.PinCode) {
-			RespError(w, RespUserOrPassErr, "密码错误")
-			return
-		}
+	if !verifyUserPassword(req.Password, user) {
+		RespError(w, RespUserOrPassErr, "密码错误")
+		return
 	}
 
-	// Reset OTP
-	user.OtpSecret = gotp.RandomSecret(32)
+	// Reset OTP - clear secret to avoid inconsistent state
+	user.OtpSecret = ""
 	user.DisableOtp = true
 	user.OtpRecoveryCodes = nil
 	user.UpdatedAt = time.Now()
@@ -866,16 +877,9 @@ func UserPortalRegenerateRecoveryCodes(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify password
-	if len(user.PinCode) != 60 {
-		if req.Password != user.PinCode {
-			RespError(w, RespUserOrPassErr, "密码错误")
-			return
-		}
-	} else {
-		if !utils.PasswordVerify(req.Password, user.PinCode) {
-			RespError(w, RespUserOrPassErr, "密码错误")
-			return
-		}
+	if !verifyUserPassword(req.Password, user) {
+		RespError(w, RespUserOrPassErr, "密码错误")
+		return
 	}
 
 	if user.DisableOtp {
