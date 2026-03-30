@@ -12,7 +12,11 @@ func payloadIn(cSess *sessdata.ConnSession, pl *sessdata.Payload) bool {
 		// 进行Acl规则判断
 		check := checkLinkAcl(cSess.Group, pl)
 		if !check {
-			// 校验不通过直接丢弃
+			// 校验不通过丢弃，并记录日志
+			ipDst := waterutil.IPv4Destination(pl.Data)
+			ipPort := waterutil.IPv4DestinationPort(pl.Data)
+			ipProto := waterutil.IPv4Protocol(pl.Data)
+			base.Trace("ACL denied:", cSess.Username, "proto:", ipProto, "dst:", ipDst, "port:", ipPort)
 			return false
 		}
 	}

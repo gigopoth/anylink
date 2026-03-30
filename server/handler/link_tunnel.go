@@ -267,5 +267,8 @@ func SetUserPolicy(username string, g *dbdata.Group) {
 		g.RouteExclude = userPolicy.RouteExclude
 		g.DsExcludeDomains = userPolicy.DsExcludeDomains
 		g.DsIncludeDomains = userPolicy.DsIncludeDomains
+		if len(userPolicy.LinkAcl) > 0 {
+			g.LinkAcl = userPolicy.LinkAcl
+		}
 	}
 }

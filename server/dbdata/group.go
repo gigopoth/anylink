@@ -172,6 +172,8 @@ func SetGroup(g *Group) error {
 
 			// 设置协议数据
 			switch v.Protocol {
+			case ALL, "":
+				v.Protocol = ALL
 			case TCP:
 				v.IpProto = waterutil.TCP
 			case UDP:
@@ -179,8 +181,7 @@ func SetGroup(g *Group) error {
 			case ICMP:
 				v.IpProto = waterutil.ICMP
 			default:
-				// 其他类型都是 all
-				v.Protocol = ALL
+				return fmt.Errorf("GroupLinkAcl 错误: 不支持的协议类型 '%s', 仅支持 all/tcp/udp/icmp", v.Protocol)
 			}
 
 			portsStr := v.Port
@@ -210,8 +211,16 @@ func SetGroup(g *Group) error {
 						if err != nil {
 							return errors.New("端口:" + rp[1] + " 格式错误, " + err.Error())
 						}
-						for i := portfrom; i <= portto; i++ {
-							ports[uint16(i)] = 1
+						if portfrom > portto {
+							return fmt.Errorf("端口范围错误: 起始端口 %d 大于结束端口 %d", portfrom, portto)
+						}
+						// 端口范围超过1000时，使用端口0（通配符）代替，避免内存浪费
+						if portto-portfrom > 1000 {
+							ports[0] = 1
+						} else {
+							for i := portfrom; i <= portto; i++ {
+								ports[uint16(i)] = 1
+							}
 						}
 
 					} else {
