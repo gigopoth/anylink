@@ -20,6 +20,7 @@ func CheckAccountExpiry() {
 	reminderDeadline := now.Add(time.Duration(expiryReminderDays) * 24 * time.Hour)
 
 	// Find active users whose limittime is between now and 7 days from now
+	// limit=0 fetches all matching records (no pagination)
 	var users []dbdata.User
 	where := "status = ? AND limittime IS NOT NULL AND limittime > ? AND limittime <= ?"
 	err := dbdata.FindWhere(&users, 0, 1, where, 1, now, reminderDeadline)

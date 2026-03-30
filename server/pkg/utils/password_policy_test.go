@@ -19,8 +19,7 @@ func TestValidatePassword(t *testing.T) {
 		password string
 		wantErr  bool
 	}{
-		{"too short", "Aa1!", false},
-		{"too short really", "Ab1!", true},
+		{"too short", "Aa1!", true},
 		{"no upper", "abcdefg1!", true},
 		{"no lower", "ABCDEFG1!", true},
 		{"no digit", "Abcdefg!x", true},
@@ -28,10 +27,6 @@ func TestValidatePassword(t *testing.T) {
 		{"valid", "Abcdefg1!", false},
 		{"valid complex", "MyP@ssw0rd!", false},
 	}
-
-	// Fix: too short cases
-	tests[0].password = "Aa1!"
-	tests[0].wantErr = true // less than 8
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -52,7 +52,9 @@ func GetPasswordPolicy() SettingPasswordPolicy {
 	if err == nil {
 		return data
 	}
-	// Return defaults - MinLength matches the original minimum of 6
+	// Fallback defaults for existing installations without policy in DB
+	// MinLength=6 matches the original minimum to maintain backward compatibility
+	// New installations get MinLength=8 from addInitData()
 	return SettingPasswordPolicy{
 		MinLength: 6,
 		MaxLength: 64,

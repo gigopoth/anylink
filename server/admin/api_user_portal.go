@@ -284,7 +284,9 @@ type resetTokenInfo struct {
 func init() {
 	// Cleanup expired reset tokens every 5 minutes
 	go func() {
-		for range time.Tick(5 * time.Minute) {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
 			resetTokensMux.Lock()
 			now := time.Now()
 			for token, info := range resetTokens {

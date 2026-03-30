@@ -177,7 +177,7 @@ func (s *Session) NewConn() *ConnSession {
 	group := &dbdata.Group{}
 	err := dbdata.One("Name", groupName, group)
 	if err != nil {
-		base.Error(err)
+		base.Error("加载用户组失败:", groupName, err)
 		return nil
 	}
 

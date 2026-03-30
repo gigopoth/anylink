@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/bjdgyc/anylink/base"
 	"github.com/bjdgyc/anylink/sessdata"
 )
 
@@ -21,7 +22,7 @@ func HealthCheck(w http.ResponseWriter, r *http.Request) {
 		"status":  "ok",
 		"uptime":  time.Since(startTime).String(),
 		"time":    time.Now().Format(time.RFC3339),
-		"version": "1.0",
+		"version": base.APP_VER,
 	}
 
 	b, _ := json.Marshal(health)
