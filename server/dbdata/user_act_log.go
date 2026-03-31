@@ -179,7 +179,7 @@ func (ua *UserActLogProcess) ParseUserAgent(userAgent string) (os_idx, client_id
 
 // 清除用户操作日志
 func (ua *UserActLogProcess) ClearUserActLog(ts string) (int64, error) {
-	affected, err := xdb.Where("created_at < '" + ts + "'").Delete(&UserActLog{})
+	affected, err := xdb.Where("created_at < ?", ts).Delete(&UserActLog{})
 	return affected, err
 }
 

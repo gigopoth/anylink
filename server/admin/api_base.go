@@ -78,14 +78,10 @@ func Login(w http.ResponseWriter, r *http.Request) {
 
 func authMiddleware(next http.Handler) http.Handler {
 	fn := func(w http.ResponseWriter, r *http.Request) {
-		// 使用请求的 Origin 而非通配符，避免过于宽松的 CORS 配置
-		origin := r.Header.Get("Origin")
-		if origin != "" {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Vary", "Origin")
-		}
+		// CORS: only allow same-origin requests (CWE-346)
+		// Do not echo arbitrary Origin headers back to prevent cross-origin attacks
 		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type,Authorization")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type,Authorization,Jwt")
 		if r.Method == http.MethodOptions {
 			// w.WriteHeader(http.StatusOK)
 			// 正式环境不支持 OPTIONS

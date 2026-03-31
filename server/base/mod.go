@@ -70,9 +70,7 @@ func CheckModOrLoad(mod string) {
 		// panic(err)
 	}
 
-	cmdstr := fmt.Sprintln("modprobe", mod)
-
-	cmd := exec.Command("sh", "-c", cmdstr)
+	cmd := exec.Command("modprobe", mod)
 	b, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Println(mod, string(b))

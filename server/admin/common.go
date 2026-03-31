@@ -3,6 +3,7 @@ package admin
 import (
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/bjdgyc/anylink/base"
@@ -26,8 +27,10 @@ func SetJwtData(data map[string]interface{}, expiresAt int64) (string, error) {
 
 func GetJwtData(jwtToken string) (map[string]interface{}, error) {
 	token, err := jwt.Parse(jwtToken, func(token *jwt.Token) (interface{}, error) {
-		// since we only use the one private key to sign the tokens,
-		// we also only use its public counter part to verify
+		// Verify signing algorithm to prevent algorithm confusion attacks (CWE-347)
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
 		return []byte(base.Cfg.JwtSecret), nil
 	})
 
@@ -85,6 +88,9 @@ func SendMail(subject, to, htmlBody string, attach *mail.File) error {
 	server.SendTimeout = 10 * time.Second
 
 	server.TLSConfig = &tls.Config{InsecureSkipVerify: dataSmtp.InsecureSkipVerify}
+	if dataSmtp.InsecureSkipVerify {
+		base.Warn("SMTP TLS certificate verification is disabled (InsecureSkipVerify=true). This is insecure and vulnerable to MITM attacks.")
+	}
 
 	// SMTP client
 	smtpClient, err := server.Connect()

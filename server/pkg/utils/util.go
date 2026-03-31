@@ -110,5 +110,16 @@ func ParseName(name string) string {
 	name = strings.ReplaceAll(name, "'", "-")
 	name = strings.ReplaceAll(name, "\"", "-")
 	name = strings.ReplaceAll(name, ";", "-")
+	// Prevent shell command injection (CWE-78): sanitize backticks, $, pipes, etc.
+	name = strings.ReplaceAll(name, "`", "-")
+	name = strings.ReplaceAll(name, "$", "-")
+	name = strings.ReplaceAll(name, "|", "-")
+	name = strings.ReplaceAll(name, "&", "-")
+	name = strings.ReplaceAll(name, "(", "-")
+	name = strings.ReplaceAll(name, ")", "-")
+	name = strings.ReplaceAll(name, ">", "-")
+	name = strings.ReplaceAll(name, "<", "-")
+	name = strings.ReplaceAll(name, "\n", "-")
+	name = strings.ReplaceAll(name, "\r", "-")
 	return name
 }

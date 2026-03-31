@@ -96,6 +96,9 @@ func (auth AuthLdap) checkUser(name, pwd string, g *Group, ext map[string]interf
 		if err != nil {
 			return fmt.Errorf("%s LDAP TLS连接失败 %s", name, err.Error())
 		}
+		if auth.InsecureSkipVerify {
+			fmt.Printf("[WARN] LDAP TLS certificate verification is disabled for %s (InsecureSkipVerify=true). This is insecure and vulnerable to MITM attacks.\n", auth.Addr)
+		}
 	}
 	err = l.Bind(auth.BindName, auth.BindPwd)
 	if err != nil {
@@ -104,10 +107,11 @@ func (auth AuthLdap) checkUser(name, pwd string, g *Group, ext map[string]interf
 	if auth.ObjectClass == "" {
 		auth.ObjectClass = "person"
 	}
-	filterAttr := "(objectClass=" + auth.ObjectClass + ")"
-	filterAttr += "(" + auth.SearchAttr + "=" + name + ")"
+	// Use ldap.EscapeFilter to prevent LDAP injection (CWE-90)
+	filterAttr := "(objectClass=" + ldap.EscapeFilter(auth.ObjectClass) + ")"
+	filterAttr += "(" + ldap.EscapeFilter(auth.SearchAttr) + "=" + ldap.EscapeFilter(name) + ")"
 	if auth.MemberOf != "" {
-		filterAttr += "(memberOf:=" + auth.MemberOf + ")"
+		filterAttr += "(memberOf:=" + ldap.EscapeFilter(auth.MemberOf) + ")"
 	}
 	searchRequest := ldap.NewSearchRequest(
 		auth.BaseDn,

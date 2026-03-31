@@ -1,12 +1,14 @@
 package admin
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -22,6 +24,11 @@ import (
 )
 
 // User portal: self-service API for VPN end users (separate from admin)
+
+// contextKey is an unexported type for context keys to avoid collisions.
+type contextKey string
+
+const portalUserKey contextKey = "portal_user"
 
 const (
 	userJwtExpiry = 3600 * 8 // 8 hours
@@ -295,7 +302,20 @@ func UserPortalActiveSessions(w http.ResponseWriter, r *http.Request) {
 var (
 	resetTokens    = make(map[string]resetTokenInfo)
 	resetTokensMux sync.Mutex
+	// Rate limiter for password reset requests (CWE-770)
+	resetRateLimiter    = make(map[string]resetRateInfo)
+	resetRateLimiterMux sync.Mutex
 )
+
+const (
+	resetRateMaxRequests = 3               // max requests per window
+	resetRateWindow      = 5 * time.Minute // rate limit window
+)
+
+type resetRateInfo struct {
+	Count     int
+	WindowEnd time.Time
+}
 
 type resetTokenInfo struct {
 	Username  string
@@ -303,7 +323,7 @@ type resetTokenInfo struct {
 }
 
 func init() {
-	// Cleanup expired reset tokens every 5 minutes
+	// Cleanup expired reset tokens and rate limit entries every 5 minutes
 	go func() {
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
@@ -316,12 +336,54 @@ func init() {
 				}
 			}
 			resetTokensMux.Unlock()
+
+			resetRateLimiterMux.Lock()
+			for key, info := range resetRateLimiter {
+				if now.After(info.WindowEnd) {
+					delete(resetRateLimiter, key)
+				}
+			}
+			resetRateLimiterMux.Unlock()
 		}
 	}()
 }
 
+// checkResetRateLimit checks and enforces rate limiting for password reset requests.
+// Returns true if the request is allowed, false if rate limited.
+func checkResetRateLimit(clientIP string) bool {
+	resetRateLimiterMux.Lock()
+	defer resetRateLimiterMux.Unlock()
+
+	now := time.Now()
+	info, exists := resetRateLimiter[clientIP]
+	if !exists || now.After(info.WindowEnd) {
+		resetRateLimiter[clientIP] = resetRateInfo{
+			Count:     1,
+			WindowEnd: now.Add(resetRateWindow),
+		}
+		return true
+	}
+	if info.Count >= resetRateMaxRequests {
+		return false
+	}
+	info.Count++
+	resetRateLimiter[clientIP] = info
+	return true
+}
+
 // UserPortalRequestPasswordReset sends a password reset email
 func UserPortalRequestPasswordReset(w http.ResponseWriter, r *http.Request) {
+	// Rate limit password reset requests to prevent abuse (CWE-770)
+	clientIP, _, _ := net.SplitHostPort(r.RemoteAddr)
+	if clientIP == "" {
+		clientIP = r.RemoteAddr
+	}
+	if !checkResetRateLimit(clientIP) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		RespError(w, RespInternalErr, "请求过于频繁，请稍后再试")
+		return
+	}
+
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {
 		RespError(w, RespInternalErr, err)
@@ -522,15 +584,18 @@ func portalAuthMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// Store username in header for downstream handlers
-		r.Header.Set("X-Portal-User", fmt.Sprint(portalUser))
-		next.ServeHTTP(w, r)
+		// Store username in request context for downstream handlers (CWE-287)
+		ctx := context.WithValue(r.Context(), portalUserKey, fmt.Sprint(portalUser))
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
 // getUsernameFromCtx extracts the username from the portal auth context
 func getUsernameFromCtx(r *http.Request) string {
-	return r.Header.Get("X-Portal-User")
+	if v, ok := r.Context().Value(portalUserKey).(string); ok {
+		return v
+	}
+	return ""
 }
 
 // verifyUserPassword verifies a password against the stored hash or plaintext
