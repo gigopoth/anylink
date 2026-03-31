@@ -1139,3 +1139,338 @@ func TestUserPortalGetOtpStatus(t *testing.T) {
 	resp := parseResp(t, w)
 	assert.Equal(RespSuccess, resp.Code)
 }
+
+// ========== LockManager Tests ==========
+
+func TestGetLockManager(t *testing.T) {
+	assert := assert.New(t)
+	lm1 := GetLockManager()
+	lm2 := GetLockManager()
+	assert.NotNil(lm1)
+	assert.True(lm1 == lm2, "GetLockManager should return the same singleton instance")
+}
+
+func TestGetLocksInfo_Empty(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/lockmanager/locksinfo", nil)
+	GetLocksInfo(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+
+	resp := parseResp(t, w)
+	assert.Equal(RespSuccess, resp.Code)
+}
+
+func TestLockManager_CheckLocked(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	lm := GetLockManager()
+	base.Cfg.AntiBruteForce = true
+	base.Cfg.MaxBanCount = 3
+	base.Cfg.BanResetTime = 60
+	base.Cfg.LockTime = 300
+
+	// Not locked yet, should return true (allowed)
+	result := lm.CheckLocked("testuser", "1.2.3.4:443")
+	assert.True(result, "User should not be locked initially")
+
+	// Simulate failed login attempts to trigger lock
+	lm.UpdateLoginStatus("testuser", "1.2.3.4:443", false)
+	lm.UpdateLoginStatus("testuser", "1.2.3.4:443", false)
+	lm.UpdateLoginStatus("testuser", "1.2.3.4:443", false)
+}
+
+func TestUnlockUser_NilState(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+
+	body := `{"description":"test","username":"nobody","ip":"1.2.3.4"}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/lockmanager/unlock", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	UnlockUser(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+
+	resp := parseResp(t, w)
+	assert.Equal(RespInternalErr, resp.Code)
+	assert.Contains(resp.Msg, "未找到锁定用户")
+}
+
+// ========== Audit API Tests ==========
+
+func TestSetAuditList(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/audit/list", nil)
+	SetAuditList(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+
+	resp := parseResp(t, w)
+	assert.Equal(RespSuccess, resp.Code)
+}
+
+func TestUserActLogList(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/user/act/log/list", nil)
+	UserActLogList(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+
+	resp := parseResp(t, w)
+	assert.Equal(RespSuccess, resp.Code)
+}
+
+// ========== More Portal Tests ==========
+
+func TestUserPortalLoginHistory(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+	base.Cfg.EncryptionPassword = false
+
+	user := &dbdata.User{
+		Username: "historyuser",
+		PinCode:  "History@123",
+		Groups:   []string{"all"},
+		Status:   1,
+	}
+	err := dbdata.SetUser(user)
+	assert.Nil(err)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/portal/login_history", nil)
+	ctx := context.WithValue(r.Context(), portalUserKey, "historyuser")
+	r = r.WithContext(ctx)
+	UserPortalLoginHistory(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+
+	resp := parseResp(t, w)
+	assert.Equal(RespSuccess, resp.Code)
+}
+
+func TestUserPortalActiveSessions(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+	base.Cfg.EncryptionPassword = false
+
+	user := &dbdata.User{
+		Username: "sessionuser",
+		PinCode:  "Session@123",
+		Groups:   []string{"all"},
+		Status:   1,
+	}
+	err := dbdata.SetUser(user)
+	assert.Nil(err)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/portal/active_sessions", nil)
+	ctx := context.WithValue(r.Context(), portalUserKey, "sessionuser")
+	r = r.WithContext(ctx)
+	UserPortalActiveSessions(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+
+	resp := parseResp(t, w)
+	assert.Equal(RespSuccess, resp.Code)
+}
+
+func TestUserPortalGetRoutes(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+	base.Cfg.EncryptionPassword = false
+
+	user := &dbdata.User{
+		Username: "routeuser",
+		PinCode:  "Route@123",
+		Groups:   []string{"all"},
+		Status:   1,
+	}
+	err := dbdata.SetUser(user)
+	assert.Nil(err)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/portal/routes", nil)
+	ctx := context.WithValue(r.Context(), portalUserKey, "routeuser")
+	r = r.WithContext(ctx)
+	UserPortalGetRoutes(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+
+	resp := parseResp(t, w)
+	assert.Equal(RespSuccess, resp.Code)
+}
+
+func TestUserPortalBandwidthStats(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+	base.Cfg.EncryptionPassword = false
+
+	user := &dbdata.User{
+		Username: "bwuser",
+		PinCode:  "Bandwidth@123",
+		Groups:   []string{"all"},
+		Status:   1,
+	}
+	err := dbdata.SetUser(user)
+	assert.Nil(err)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/portal/bandwidth_stats", nil)
+	ctx := context.WithValue(r.Context(), portalUserKey, "bwuser")
+	r = r.WithContext(ctx)
+	UserPortalBandwidthStats(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+
+	resp := parseResp(t, w)
+	assert.Equal(RespSuccess, resp.Code)
+}
+
+func TestUserPortalDisconnectSession_EmptyToken(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+	base.Cfg.EncryptionPassword = false
+
+	user := &dbdata.User{
+		Username: "disconnuser",
+		PinCode:  "Disconn@123",
+		Groups:   []string{"all"},
+		Status:   1,
+	}
+	err := dbdata.SetUser(user)
+	assert.Nil(err)
+
+	body := `{"token":""}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/portal/disconnect_session", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	ctx := context.WithValue(r.Context(), portalUserKey, "disconnuser")
+	r = r.WithContext(ctx)
+	UserPortalDisconnectSession(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+
+	resp := parseResp(t, w)
+	assert.Equal(RespParamErr, resp.Code)
+}
+
+// ========== Middleware Tests ==========
+
+func TestLimitBodyMiddleware(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+
+	called := false
+	innerHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		body, _ := io.ReadAll(r.Body)
+		w.Write(body)
+	})
+	wrapped := limitBodyMiddleware(innerHandler)
+
+	smallBody := strings.Repeat("a", 100)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/test", strings.NewReader(smallBody))
+	wrapped.ServeHTTP(w, r)
+	assert.True(called, "inner handler should be called")
+	assert.Equal(http.StatusOK, w.Code)
+}
+
+func TestRecoverHttp(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+
+	panicHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		panic("test panic")
+	})
+	wrapped := recoverHttp(panicHandler)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/test", nil)
+	wrapped.ServeHTTP(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+
+	resp := parseResp(t, w)
+	assert.Equal(500, resp.Code)
+}
+
+// ========== Portal Bind OTP Tests ==========
+
+func TestUserPortalBindOtp(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+	base.Cfg.EncryptionPassword = false
+
+	user := &dbdata.User{
+		Username:   "bindotpuser",
+		PinCode:    "BindOtp@123",
+		Groups:     []string{"all"},
+		Status:     1,
+		DisableOtp: true,
+	}
+	err := dbdata.SetUser(user)
+	assert.Nil(err)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/portal/bind_otp", nil)
+	ctx := context.WithValue(r.Context(), portalUserKey, "bindotpuser")
+	r = r.WithContext(ctx)
+	UserPortalBindOtp(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+
+	resp := parseResp(t, w)
+	assert.Equal(RespSuccess, resp.Code)
+	dataMap, ok := resp.Data.(map[string]interface{})
+	assert.True(ok)
+	assert.Contains(dataMap, "qr_code")
+	assert.Contains(dataMap, "secret")
+}
+
+func TestUserPortalResetOtp_WrongPassword(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+	base.Cfg.EncryptionPassword = false
+
+	user := &dbdata.User{
+		Username: "resetotpuser",
+		PinCode:  "Pass@123",
+		Groups:   []string{"all"},
+		Status:   1,
+	}
+	err := dbdata.SetUser(user)
+	assert.Nil(err)
+
+	body := `{"password":"WrongPass"}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/portal/reset_otp", strings.NewReader(body))
+	r.Header.Set("Content-Type", "application/json")
+	ctx := context.WithValue(r.Context(), portalUserKey, "resetotpuser")
+	r = r.WithContext(ctx)
+	UserPortalResetOtp(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+
+	resp := parseResp(t, w)
+	assert.Equal(RespUserOrPassErr, resp.Code)
+}
