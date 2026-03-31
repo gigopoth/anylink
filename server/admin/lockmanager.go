@@ -76,7 +76,7 @@ func GetLocksInfo(w http.ResponseWriter, r *http.Request) {
 }
 
 func UnlockUser(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(r.Body)
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {
 		RespError(w, RespInternalErr, err)
 		return

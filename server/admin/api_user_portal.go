@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"net"
 	"net/http"
@@ -310,6 +311,7 @@ var (
 const (
 	resetRateMaxRequests = 3               // max requests per window
 	resetRateWindow      = 5 * time.Minute // rate limit window
+	resetRateMaxEntries  = 10000           // max entries in rate limiter map to prevent memory exhaustion
 )
 
 type resetRateInfo struct {
@@ -357,6 +359,10 @@ func checkResetRateLimit(clientIP string) bool {
 	now := time.Now()
 	info, exists := resetRateLimiter[clientIP]
 	if !exists || now.After(info.WindowEnd) {
+		// Prevent unbounded map growth from distributed attacks
+		if !exists && len(resetRateLimiter) >= resetRateMaxEntries {
+			return false
+		}
 		resetRateLimiter[clientIP] = resetRateInfo{
 			Count:     1,
 			WindowEnd: now.Add(resetRateWindow),
@@ -457,7 +463,7 @@ func UserPortalRequestPasswordReset(w http.ResponseWriter, r *http.Request) {
 <p>此令牌将在30分钟后过期。</p>
 <p>如果您没有请求密码重置，请忽略此邮件。</p>
 </body>
-</html>`, user.Nickname, resetToken)
+</html>`, html.EscapeString(user.Nickname), html.EscapeString(resetToken))
 
 	go func() {
 		if err := SendMail(base.Cfg.Issuer+" - 密码重置", user.Email, htmlBody, nil); err != nil {
@@ -1070,7 +1076,7 @@ func sendPasswordChangeNotification(user *dbdata.User) {
 <p>您的 <b>%s</b> VPN 账号密码已于 %s 成功修改。</p>
 <p>如果这不是您本人的操作，请立即联系管理员。</p>
 </body>
-</html>`, user.Nickname, base.Cfg.Issuer, time.Now().Format("2006-01-02 15:04:05"))
+</html>`, html.EscapeString(user.Nickname), html.EscapeString(base.Cfg.Issuer), time.Now().Format("2006-01-02 15:04:05"))
 
 	subject := fmt.Sprintf("%s - 密码修改通知", base.Cfg.Issuer)
 	if err := SendMail(subject, user.Email, htmlBody, nil); err != nil {
@@ -1100,8 +1106,8 @@ func SendLoginAlertEmail(username, remoteAddr, deviceType, platformVersion strin
 </p>
 <p>如果这不是您本人的操作，请立即修改密码并联系管理员。</p>
 </body>
-</html>`, user.Nickname, base.Cfg.Issuer, time.Now().Format("2006-01-02 15:04:05"),
-		remoteAddr, deviceType, platformVersion)
+</html>`, html.EscapeString(user.Nickname), html.EscapeString(base.Cfg.Issuer), time.Now().Format("2006-01-02 15:04:05"),
+		html.EscapeString(remoteAddr), html.EscapeString(deviceType), html.EscapeString(platformVersion))
 
 	subject := fmt.Sprintf("%s - 登录提醒", base.Cfg.Issuer)
 	if err := SendMail(subject, user.Email, htmlBody, nil); err != nil {
@@ -1128,7 +1134,7 @@ func SendAccountLockedEmail(username string) {
 <p>账号将在一段时间后自动解锁。如需立即解锁，请联系管理员。</p>
 <p>如果这些登录尝试不是您本人的操作，请在解锁后立即修改密码。</p>
 </body>
-</html>`, user.Nickname, base.Cfg.Issuer, time.Now().Format("2006-01-02 15:04:05"))
+</html>`, html.EscapeString(user.Nickname), html.EscapeString(base.Cfg.Issuer), time.Now().Format("2006-01-02 15:04:05"))
 
 	subject := fmt.Sprintf("%s - 账号锁定通知", base.Cfg.Issuer)
 	if err := SendMail(subject, user.Email, htmlBody, nil); err != nil {

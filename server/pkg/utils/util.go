@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
-	"strings"
+	"regexp"
 	"sync/atomic"
 	"time"
 )
@@ -105,21 +105,13 @@ func RandomHex(length int) string {
 	return hex.EncodeToString(b)
 }
 
+// parseNameRe matches any character that is NOT in the allowed set.
+// Allowed: letters (Unicode), digits, hyphen, underscore, dot, @
+var parseNameRe = regexp.MustCompile(`[^\p{L}\p{N}\-_.@]`)
+
+// ParseName sanitizes a name for safe use in shell commands (e.g. ip link alias).
+// Uses an allowlist approach: only letters, digits, '-', '_', '.', '@' are kept;
+// all other characters are replaced with '-'.
 func ParseName(name string) string {
-	name = strings.ReplaceAll(name, " ", "-")
-	name = strings.ReplaceAll(name, "'", "-")
-	name = strings.ReplaceAll(name, "\"", "-")
-	name = strings.ReplaceAll(name, ";", "-")
-	// Prevent shell command injection (CWE-78): sanitize backticks, $, pipes, etc.
-	name = strings.ReplaceAll(name, "`", "-")
-	name = strings.ReplaceAll(name, "$", "-")
-	name = strings.ReplaceAll(name, "|", "-")
-	name = strings.ReplaceAll(name, "&", "-")
-	name = strings.ReplaceAll(name, "(", "-")
-	name = strings.ReplaceAll(name, ")", "-")
-	name = strings.ReplaceAll(name, ">", "-")
-	name = strings.ReplaceAll(name, "<", "-")
-	name = strings.ReplaceAll(name, "\n", "-")
-	name = strings.ReplaceAll(name, "\r", "-")
-	return name
+	return parseNameRe.ReplaceAllString(name, "-")
 }
