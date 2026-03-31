@@ -361,6 +361,7 @@ func checkResetRateLimit(clientIP string) bool {
 	if !exists || now.After(info.WindowEnd) {
 		// Prevent unbounded map growth from distributed attacks
 		if !exists && len(resetRateLimiter) >= resetRateMaxEntries {
+			base.Warn("Password reset rate limiter at capacity (", resetRateMaxEntries, " entries). Possible distributed attack.")
 			return false
 		}
 		resetRateLimiter[clientIP] = resetRateInfo{
