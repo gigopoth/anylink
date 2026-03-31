@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -41,13 +42,18 @@ func TestJwtData_Tampered(t *testing.T) {
 	token, err := SetJwtData(data, expiresAt)
 	assert.Nil(err)
 
-	// Tamper with the token by modifying a character in the signature
+	// Tamper with the token by modifying a character in the middle of the signature
+	// Avoid last char which may be base64 padding and not affect decoded bytes
 	tampered := []byte(token)
-	lastIdx := len(tampered) - 1
-	if tampered[lastIdx] == 'a' {
-		tampered[lastIdx] = 'b'
-	} else {
-		tampered[lastIdx] = 'a'
+	// Find the last '.' which separates header.payload.signature
+	sigStart := strings.LastIndex(token, ".") + 1
+	modIdx := sigStart + 2 // Modify a character well inside the signature
+	if modIdx < len(tampered) {
+		if tampered[modIdx] == 'A' {
+			tampered[modIdx] = 'B'
+		} else {
+			tampered[modIdx] = 'A'
+		}
 	}
 
 	_, err = GetJwtData(string(tampered))
