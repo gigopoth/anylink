@@ -2,6 +2,7 @@ package admin
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -870,5 +871,271 @@ func TestPortalGetPasswordPolicy(t *testing.T) {
 	var resp Resp
 	err := json.Unmarshal(body, &resp)
 	assert.Nil(err)
+	assert.Equal(RespSuccess, resp.Code)
+}
+
+// parseResp is a helper to parse JSON response
+func parseResp(t *testing.T, w *httptest.ResponseRecorder) Resp {
+	body, _ := io.ReadAll(w.Body)
+	var resp Resp
+	err := json.Unmarshal(body, &resp)
+	assert.Nil(t, err)
+	return resp
+}
+
+// ========== Settings Tests ==========
+
+func TestSetOtherSmtp(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/set/other/smtp", nil)
+	SetOtherSmtp(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+
+	resp := parseResp(t, w)
+	assert.Equal(RespSuccess, resp.Code)
+}
+
+func TestSetPasswordPolicy(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	// Read current policy
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/set/password_policy", nil)
+	SetPasswordPolicy(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+	resp := parseResp(t, w)
+	assert.Equal(RespSuccess, resp.Code)
+
+	// Edit policy
+	policyJSON := `{"min_length":10,"max_length":64,"require_upper":true,"require_lower":true,"require_digit":true,"require_spec":false}`
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodPost, "/set/password_policy/edit", bytes.NewReader([]byte(policyJSON)))
+	r.Header.Set("Content-Type", "application/json")
+	SetPasswordPolicyEdit(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+	resp = parseResp(t, w)
+	assert.Equal(RespSuccess, resp.Code)
+
+	// Read again and verify min_length was updated
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodGet, "/set/password_policy", nil)
+	SetPasswordPolicy(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+	resp = parseResp(t, w)
+	assert.Equal(RespSuccess, resp.Code)
+	dataMap, ok := resp.Data.(map[string]interface{})
+	assert.True(ok)
+	assert.Equal(float64(10), dataMap["min_length"])
+}
+
+func TestSetPasswordPolicyEdit_InvalidRange(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	policyJSON := `{"min_length":100,"max_length":10}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/set/password_policy/edit", bytes.NewReader([]byte(policyJSON)))
+	r.Header.Set("Content-Type", "application/json")
+	SetPasswordPolicyEdit(w, r)
+
+	resp := parseResp(t, w)
+	assert.Equal(RespParamErr, resp.Code)
+}
+
+func TestSetOtherAuditLog(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/set/other/audit_log", nil)
+	SetOtherAuditLog(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+
+	resp := parseResp(t, w)
+	assert.Equal(RespSuccess, resp.Code)
+}
+
+func TestSetOtherAuditLogEdit_InvalidLifeDay(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	body := `{"life_day":999,"clear_time":"3:00"}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/set/other/audit_log/edit", bytes.NewReader([]byte(body)))
+	r.Header.Set("Content-Type", "application/json")
+	SetOtherAuditLogEdit(w, r)
+
+	resp := parseResp(t, w)
+	assert.Equal(RespParamErr, resp.Code)
+}
+
+func TestSetOtherAuditLogEdit_InvalidClearTime(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	body := `{"life_day":30,"clear_time":"25:00"}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/set/other/audit_log/edit", bytes.NewReader([]byte(body)))
+	r.Header.Set("Content-Type", "application/json")
+	SetOtherAuditLogEdit(w, r)
+
+	resp := parseResp(t, w)
+	assert.Equal(RespParamErr, resp.Code)
+}
+
+// ========== Portal Password Change Tests ==========
+
+func TestUserPortalChangePassword_Success(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+	base.Cfg.EncryptionPassword = false
+
+	user := &dbdata.User{
+		Username:   "pwduser",
+		PinCode:    "OldPass@123",
+		Groups:     []string{"all"},
+		Status:     1,
+		DisableOtp: true,
+	}
+	err := dbdata.SetUser(user)
+	assert.Nil(err)
+
+	body := `{"old_password":"OldPass@123","new_password":"NewPass@456"}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/portal/change_password", bytes.NewReader([]byte(body)))
+	r.Header.Set("Content-Type", "application/json")
+	ctx := context.WithValue(r.Context(), portalUserKey, "pwduser")
+	r = r.WithContext(ctx)
+	UserPortalChangePassword(w, r)
+
+	resp := parseResp(t, w)
+	assert.Equal(RespSuccess, resp.Code)
+}
+
+func TestUserPortalChangePassword_WrongOld(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+	base.Cfg.EncryptionPassword = false
+
+	user := &dbdata.User{
+		Username:   "pwduser2",
+		PinCode:    "Correct@123",
+		Groups:     []string{"all"},
+		Status:     1,
+		DisableOtp: true,
+	}
+	err := dbdata.SetUser(user)
+	assert.Nil(err)
+
+	body := `{"old_password":"Wrong@123","new_password":"NewPass@456"}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/portal/change_password", bytes.NewReader([]byte(body)))
+	r.Header.Set("Content-Type", "application/json")
+	ctx := context.WithValue(r.Context(), portalUserKey, "pwduser2")
+	r = r.WithContext(ctx)
+	UserPortalChangePassword(w, r)
+
+	resp := parseResp(t, w)
+	assert.Equal(RespUserOrPassErr, resp.Code)
+}
+
+func TestUserPortalChangePassword_EmptyFields(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	body := `{"old_password":"","new_password":""}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/portal/change_password", bytes.NewReader([]byte(body)))
+	r.Header.Set("Content-Type", "application/json")
+	ctx := context.WithValue(r.Context(), portalUserKey, "someuser")
+	r = r.WithContext(ctx)
+	UserPortalChangePassword(w, r)
+
+	resp := parseResp(t, w)
+	assert.Equal(RespParamErr, resp.Code)
+}
+
+// ========== Portal Profile Tests ==========
+
+func TestUserPortalProfile(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+	base.Cfg.EncryptionPassword = false
+
+	user := &dbdata.User{
+		Username:   "profileuser",
+		PinCode:    "Profile@123",
+		Groups:     []string{"all"},
+		Status:     1,
+		DisableOtp: true,
+	}
+	err := dbdata.SetUser(user)
+	assert.Nil(err)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/portal/profile", nil)
+	ctx := context.WithValue(r.Context(), portalUserKey, "profileuser")
+	r = r.WithContext(ctx)
+	UserPortalProfile(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+
+	resp := parseResp(t, w)
+	assert.Equal(RespSuccess, resp.Code)
+	dataMap, ok := resp.Data.(map[string]interface{})
+	assert.True(ok)
+	assert.Equal("profileuser", dataMap["username"])
+}
+
+// ========== Portal OTP Tests ==========
+
+func TestUserPortalGetOtpStatus(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+	base.Cfg.EncryptionPassword = false
+
+	user := &dbdata.User{
+		Username:   "otpuser",
+		PinCode:    "OtpUser@123",
+		Groups:     []string{"all"},
+		Status:     1,
+		DisableOtp: true,
+	}
+	err := dbdata.SetUser(user)
+	assert.Nil(err)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/portal/otp_status", nil)
+	ctx := context.WithValue(r.Context(), portalUserKey, "otpuser")
+	r = r.WithContext(ctx)
+	UserPortalGetOtpStatus(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+
+	resp := parseResp(t, w)
 	assert.Equal(RespSuccess, resp.Code)
 }
