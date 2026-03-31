@@ -59,7 +59,7 @@ func UserIpMapDetail(w http.ResponseWriter, r *http.Request) {
 func UserIpMapSet(w http.ResponseWriter, r *http.Request) {
 	_ = r.ParseForm()
 
-	body, err := io.ReadAll(r.Body)
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {
 		RespError(w, RespInternalErr, err)
 		return

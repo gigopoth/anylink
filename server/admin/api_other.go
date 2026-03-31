@@ -26,7 +26,7 @@ func setOtherGet(data interface{}, w http.ResponseWriter) {
 }
 
 func setOtherEdit(data interface{}, w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(r.Body)
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {
 		RespError(w, RespInternalErr, err)
 		return
@@ -88,7 +88,7 @@ func SetOtherAuditLog(w http.ResponseWriter, r *http.Request) {
 }
 
 func SetOtherAuditLogEdit(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(r.Body)
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {
 		RespError(w, RespInternalErr, err)
 		return
@@ -125,7 +125,7 @@ func SetPasswordPolicy(w http.ResponseWriter, r *http.Request) {
 
 // SetPasswordPolicyEdit updates the password policy
 func SetPasswordPolicyEdit(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(r.Body)
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {
 		RespError(w, RespInternalErr, err)
 		return

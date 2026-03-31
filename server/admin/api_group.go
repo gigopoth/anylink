@@ -83,7 +83,7 @@ func GroupDetail(w http.ResponseWriter, r *http.Request) {
 }
 
 func GroupSet(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(r.Body)
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {
 		RespError(w, RespInternalErr, err)
 		return
@@ -130,7 +130,7 @@ func GroupAuthLogin(w http.ResponseWriter, r *http.Request) {
 		Auth map[string]interface{} `json:"auth"`
 	}
 
-	body, err := io.ReadAll(r.Body)
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {
 		RespError(w, RespInternalErr, err)
 		return

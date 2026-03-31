@@ -1,12 +1,15 @@
 package admin
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -22,6 +25,11 @@ import (
 )
 
 // User portal: self-service API for VPN end users (separate from admin)
+
+// contextKey is an unexported type for context keys to avoid collisions.
+type contextKey string
+
+const portalUserKey contextKey = "portal_user"
 
 const (
 	userJwtExpiry = 3600 * 8 // 8 hours
@@ -295,7 +303,21 @@ func UserPortalActiveSessions(w http.ResponseWriter, r *http.Request) {
 var (
 	resetTokens    = make(map[string]resetTokenInfo)
 	resetTokensMux sync.Mutex
+	// Rate limiter for password reset requests (CWE-770)
+	resetRateLimiter    = make(map[string]resetRateInfo)
+	resetRateLimiterMux sync.Mutex
 )
+
+const (
+	resetRateMaxRequests = 3               // max requests per window
+	resetRateWindow      = 5 * time.Minute // rate limit window
+	resetRateMaxEntries  = 10000           // max entries in rate limiter map to prevent memory exhaustion
+)
+
+type resetRateInfo struct {
+	Count     int
+	WindowEnd time.Time
+}
 
 type resetTokenInfo struct {
 	Username  string
@@ -303,7 +325,7 @@ type resetTokenInfo struct {
 }
 
 func init() {
-	// Cleanup expired reset tokens every 5 minutes
+	// Cleanup expired reset tokens and rate limit entries every 5 minutes
 	go func() {
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
@@ -316,12 +338,59 @@ func init() {
 				}
 			}
 			resetTokensMux.Unlock()
+
+			resetRateLimiterMux.Lock()
+			for key, info := range resetRateLimiter {
+				if now.After(info.WindowEnd) {
+					delete(resetRateLimiter, key)
+				}
+			}
+			resetRateLimiterMux.Unlock()
 		}
 	}()
 }
 
+// checkResetRateLimit checks and enforces rate limiting for password reset requests.
+// Returns true if the request is allowed, false if rate limited.
+func checkResetRateLimit(clientIP string) bool {
+	resetRateLimiterMux.Lock()
+	defer resetRateLimiterMux.Unlock()
+
+	now := time.Now()
+	info, exists := resetRateLimiter[clientIP]
+	if !exists || now.After(info.WindowEnd) {
+		// Prevent unbounded map growth from distributed attacks
+		if !exists && len(resetRateLimiter) >= resetRateMaxEntries {
+			base.Warn("Password reset rate limiter at capacity (", resetRateMaxEntries, " entries). Possible distributed attack.")
+			return false
+		}
+		resetRateLimiter[clientIP] = resetRateInfo{
+			Count:     1,
+			WindowEnd: now.Add(resetRateWindow),
+		}
+		return true
+	}
+	if info.Count >= resetRateMaxRequests {
+		return false
+	}
+	info.Count++
+	resetRateLimiter[clientIP] = info
+	return true
+}
+
 // UserPortalRequestPasswordReset sends a password reset email
 func UserPortalRequestPasswordReset(w http.ResponseWriter, r *http.Request) {
+	// Rate limit password reset requests to prevent abuse (CWE-770)
+	clientIP, _, _ := net.SplitHostPort(r.RemoteAddr)
+	if clientIP == "" {
+		clientIP = r.RemoteAddr // fallback when RemoteAddr has no port
+	}
+	if !checkResetRateLimit(clientIP) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		RespError(w, RespInternalErr, "请求过于频繁，请稍后再试")
+		return
+	}
+
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {
 		RespError(w, RespInternalErr, err)
@@ -395,7 +464,7 @@ func UserPortalRequestPasswordReset(w http.ResponseWriter, r *http.Request) {
 <p>此令牌将在30分钟后过期。</p>
 <p>如果您没有请求密码重置，请忽略此邮件。</p>
 </body>
-</html>`, user.Nickname, resetToken)
+</html>`, html.EscapeString(user.Nickname), html.EscapeString(resetToken))
 
 	go func() {
 		if err := SendMail(base.Cfg.Issuer+" - 密码重置", user.Email, htmlBody, nil); err != nil {
@@ -522,15 +591,18 @@ func portalAuthMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// Store username in header for downstream handlers
-		r.Header.Set("X-Portal-User", fmt.Sprint(portalUser))
-		next.ServeHTTP(w, r)
+		// Store username in request context for downstream handlers (CWE-287)
+		ctx := context.WithValue(r.Context(), portalUserKey, fmt.Sprint(portalUser))
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
 // getUsernameFromCtx extracts the username from the portal auth context
 func getUsernameFromCtx(r *http.Request) string {
-	return r.Header.Get("X-Portal-User")
+	if v, ok := r.Context().Value(portalUserKey).(string); ok {
+		return v
+	}
+	return ""
 }
 
 // verifyUserPassword verifies a password against the stored hash or plaintext
@@ -1005,7 +1077,7 @@ func sendPasswordChangeNotification(user *dbdata.User) {
 <p>您的 <b>%s</b> VPN 账号密码已于 %s 成功修改。</p>
 <p>如果这不是您本人的操作，请立即联系管理员。</p>
 </body>
-</html>`, user.Nickname, base.Cfg.Issuer, time.Now().Format("2006-01-02 15:04:05"))
+</html>`, html.EscapeString(user.Nickname), html.EscapeString(base.Cfg.Issuer), time.Now().Format("2006-01-02 15:04:05"))
 
 	subject := fmt.Sprintf("%s - 密码修改通知", base.Cfg.Issuer)
 	if err := SendMail(subject, user.Email, htmlBody, nil); err != nil {
@@ -1035,8 +1107,8 @@ func SendLoginAlertEmail(username, remoteAddr, deviceType, platformVersion strin
 </p>
 <p>如果这不是您本人的操作，请立即修改密码并联系管理员。</p>
 </body>
-</html>`, user.Nickname, base.Cfg.Issuer, time.Now().Format("2006-01-02 15:04:05"),
-		remoteAddr, deviceType, platformVersion)
+</html>`, html.EscapeString(user.Nickname), html.EscapeString(base.Cfg.Issuer), time.Now().Format("2006-01-02 15:04:05"),
+		html.EscapeString(remoteAddr), html.EscapeString(deviceType), html.EscapeString(platformVersion))
 
 	subject := fmt.Sprintf("%s - 登录提醒", base.Cfg.Issuer)
 	if err := SendMail(subject, user.Email, htmlBody, nil); err != nil {
@@ -1063,7 +1135,7 @@ func SendAccountLockedEmail(username string) {
 <p>账号将在一段时间后自动解锁。如需立即解锁，请联系管理员。</p>
 <p>如果这些登录尝试不是您本人的操作，请在解锁后立即修改密码。</p>
 </body>
-</html>`, user.Nickname, base.Cfg.Issuer, time.Now().Format("2006-01-02 15:04:05"))
+</html>`, html.EscapeString(user.Nickname), html.EscapeString(base.Cfg.Issuer), time.Now().Format("2006-01-02 15:04:05"))
 
 	subject := fmt.Sprintf("%s - 账号锁定通知", base.Cfg.Issuer)
 	if err := SendMail(subject, user.Email, htmlBody, nil); err != nil {

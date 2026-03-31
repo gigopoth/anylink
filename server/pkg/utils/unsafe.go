@@ -1,20 +1,11 @@
 package utils
 
-import (
-	"unsafe"
-)
-
-// BytesToString converts byte slice to string.
+// BytesToString converts byte slice to string without unsafe pointer operations (CWE-248).
 func BytesToString(b []byte) string {
-	return *(*string)(unsafe.Pointer(&b))
+	return string(b)
 }
 
-// StringToBytes converts string to byte slice.
+// StringToBytes converts string to byte slice without unsafe pointer operations (CWE-248).
 func StringToBytes(s string) []byte {
-	return *(*[]byte)(unsafe.Pointer(
-		&struct {
-			string
-			Cap int
-		}{s, len(s)},
-	))
+	return []byte(s)
 }

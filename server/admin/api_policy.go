@@ -57,7 +57,7 @@ func PolicyDetail(w http.ResponseWriter, r *http.Request) {
 }
 
 func PolicySet(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(r.Body)
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {
 		RespError(w, RespInternalErr, err)
 		return

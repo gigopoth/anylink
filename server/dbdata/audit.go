@@ -57,6 +57,6 @@ func GetAuditSession(search string) *xorm.Session {
 }
 
 func ClearAccessAudit(ts string) (int64, error) {
-	affected, err := xdb.Where("created_at < '" + ts + "'").Delete(&AccessAudit{})
+	affected, err := xdb.Where("created_at < ?", ts).Delete(&AccessAudit{})
 	return affected, err
 }
