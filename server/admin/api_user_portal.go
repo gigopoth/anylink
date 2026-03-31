@@ -376,7 +376,7 @@ func UserPortalRequestPasswordReset(w http.ResponseWriter, r *http.Request) {
 	// Rate limit password reset requests to prevent abuse (CWE-770)
 	clientIP, _, _ := net.SplitHostPort(r.RemoteAddr)
 	if clientIP == "" {
-		clientIP = r.RemoteAddr
+		clientIP = r.RemoteAddr // fallback when RemoteAddr has no port
 	}
 	if !checkResetRateLimit(clientIP) {
 		w.WriteHeader(http.StatusTooManyRequests)

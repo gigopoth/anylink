@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/bjdgyc/anylink/base"
 	"github.com/go-ldap/ldap"
 )
 
@@ -97,7 +98,7 @@ func (auth AuthLdap) checkUser(name, pwd string, g *Group, ext map[string]interf
 			return fmt.Errorf("%s LDAP TLS连接失败 %s", name, err.Error())
 		}
 		if auth.InsecureSkipVerify {
-			fmt.Printf("[WARN] LDAP TLS certificate verification is disabled for %s (InsecureSkipVerify=true). This is insecure and vulnerable to MITM attacks.\n", auth.Addr)
+			base.Warn("LDAP TLS certificate verification is disabled for", auth.Addr, "(InsecureSkipVerify=true). This is insecure and vulnerable to MITM attacks.")
 		}
 	}
 	err = l.Bind(auth.BindName, auth.BindPwd)
