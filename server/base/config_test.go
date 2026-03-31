@@ -1,6 +1,7 @@
 package base
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -59,6 +60,121 @@ func TestConfigEnvMapping(t *testing.T) {
 
 	// The envs map should exist; document current state (currently empty)
 	assert.NotNil(envs, "envs map should be initialized")
+}
+
+// validTestConfig returns a ServerConfig with all fields set to valid values.
+func validTestConfig() *ServerConfig {
+	return &ServerConfig{
+		DbType:         "sqlite3",
+		LinkMode:       "tun",
+		LogLevel:       "info",
+		MaxClient:      100,
+		MaxUserClient:  3,
+		Mtu:            1460,
+		IpLease:        86400,
+		SessionTimeout: 3600,
+		Ipv4CIDR:       "192.168.90.0/24",
+		Ipv4Gateway:    "192.168.90.1",
+		Ipv4Start:      "192.168.90.100",
+		Ipv4End:        "192.168.90.200",
+		CstpKeepalive:  3,
+		CstpDpd:        20,
+	}
+}
+
+func TestValidateConfig_Valid(t *testing.T) {
+	origCfg := Cfg
+	defer func() { Cfg = origCfg }()
+
+	Cfg = validTestConfig()
+	errs := ValidateConfig()
+	assert.Empty(t, errs, "expected no validation errors for a valid config")
+}
+
+func TestValidateConfig_InvalidDbType(t *testing.T) {
+	origCfg := Cfg
+	defer func() { Cfg = origCfg }()
+
+	Cfg = validTestConfig()
+	Cfg.DbType = "oracle"
+	errs := ValidateConfig()
+	assert.NotEmpty(t, errs, "expected validation errors")
+	assert.Contains(t, errs[0], "db_type")
+}
+
+func TestValidateConfig_InvalidLinkMode(t *testing.T) {
+	origCfg := Cfg
+	defer func() { Cfg = origCfg }()
+
+	Cfg = validTestConfig()
+	Cfg.LinkMode = "invalid"
+	errs := ValidateConfig()
+	assert.NotEmpty(t, errs, "expected validation errors")
+	assert.Contains(t, errs[0], "link_mode")
+}
+
+func TestValidateConfig_InvalidMTU(t *testing.T) {
+	origCfg := Cfg
+	defer func() { Cfg = origCfg }()
+
+	// MTU too low
+	Cfg = validTestConfig()
+	Cfg.Mtu = 0
+	errs := ValidateConfig()
+	assert.NotEmpty(t, errs, "expected validation errors for mtu=0")
+	found := false
+	for _, e := range errs {
+		if strings.Contains(e, "mtu") {
+			found = true
+		}
+	}
+	assert.True(t, found, "expected an error mentioning mtu")
+
+	// MTU too high
+	Cfg = validTestConfig()
+	Cfg.Mtu = 10000
+	errs = ValidateConfig()
+	assert.NotEmpty(t, errs, "expected validation errors for mtu=10000")
+	found = false
+	for _, e := range errs {
+		if strings.Contains(e, "mtu") {
+			found = true
+		}
+	}
+	assert.True(t, found, "expected an error mentioning mtu")
+}
+
+func TestValidateConfig_InvalidCIDR(t *testing.T) {
+	origCfg := Cfg
+	defer func() { Cfg = origCfg }()
+
+	Cfg = validTestConfig()
+	Cfg.Ipv4CIDR = "invalid"
+	errs := ValidateConfig()
+	assert.NotEmpty(t, errs, "expected validation errors")
+	assert.Contains(t, errs[0], "ipv4_cidr")
+}
+
+func TestValidateConfig_InvalidIP(t *testing.T) {
+	origCfg := Cfg
+	defer func() { Cfg = origCfg }()
+
+	Cfg = validTestConfig()
+	Cfg.Ipv4Gateway = "not-an-ip"
+	errs := ValidateConfig()
+	assert.NotEmpty(t, errs, "expected validation errors")
+	assert.Contains(t, errs[0], "ipv4_gateway")
+}
+
+func TestEnvMapping_AllConfigsHaveEnvVars(t *testing.T) {
+	assert := assert.New(t)
+
+	for _, c := range configs {
+		expected := "LINK_" + strings.ToUpper(c.Name)
+		actual, ok := envs[c.Name]
+		assert.True(ok, "envs map should have entry for config %q", c.Name)
+		assert.Equal(expected, actual, "env var for config %q", c.Name)
+	}
 }
 
 func TestServerConfigStruct(t *testing.T) {
