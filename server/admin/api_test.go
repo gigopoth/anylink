@@ -1,7 +1,9 @@
 package admin
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -367,4 +369,506 @@ func TestGroupNames_Empty(t *testing.T) {
 	count, ok := dataMap["count"].(float64)
 	assert.True(ok)
 	assert.Equal(float64(0), count)
+}
+
+// ========== Group CRUD Tests ==========
+
+func TestGroupCRUD(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	// Create a group
+	groupJSON := `{"name":"testgroup","status":1,"bandwidth":100,"client_dns":[{"val":"8.8.8.8"}],"route_include":[{"val":"10.0.0.0/8"}]}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/group/set", bytes.NewReader([]byte(groupJSON)))
+	r.Header.Set("Content-Type", "application/json")
+	GroupSet(w, r)
+	body, _ := io.ReadAll(w.Body)
+	var resp Resp
+	err := json.Unmarshal(body, &resp)
+	assert.Nil(err)
+	assert.Equal(RespSuccess, resp.Code, "GroupSet failed: %s", resp.Msg)
+
+	// List groups
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodGet, "/group/list", nil)
+	GroupList(w, r)
+	body, _ = io.ReadAll(w.Body)
+	err = json.Unmarshal(body, &resp)
+	assert.Nil(err)
+	assert.Equal(RespSuccess, resp.Code)
+	dataMap, ok := resp.Data.(map[string]interface{})
+	assert.True(ok)
+	listCount := dataMap["count"].(float64)
+	assert.True(listCount > 0, "expected groups count > 0")
+
+	// Get group detail (id=1 for default "all" group)
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodGet, "/group/detail?id=1", nil)
+	GroupDetail(w, r)
+	body, _ = io.ReadAll(w.Body)
+	err = json.Unmarshal(body, &resp)
+	assert.Nil(err)
+	assert.Equal(RespSuccess, resp.Code)
+
+	// Get group names
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodGet, "/group/names", nil)
+	GroupNames(w, r)
+	body, _ = io.ReadAll(w.Body)
+	err = json.Unmarshal(body, &resp)
+	assert.Nil(err)
+	assert.Equal(RespSuccess, resp.Code)
+	dataMap, ok = resp.Data.(map[string]interface{})
+	assert.True(ok)
+	namesCount := dataMap["count"].(float64)
+	assert.True(namesCount > 0)
+
+	// Get group names with IDs
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodGet, "/group/namesids", nil)
+	GroupNamesIds(w, r)
+	body, _ = io.ReadAll(w.Body)
+	err = json.Unmarshal(body, &resp)
+	assert.Nil(err)
+	assert.Equal(RespSuccess, resp.Code)
+
+	// Delete the created group by looking up its actual ID
+	var createdGroup dbdata.Group
+	err = dbdata.One("Name", "testgroup", &createdGroup)
+	assert.Nil(err)
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/group/del?id=%d", createdGroup.Id), nil)
+	GroupDel(w, r)
+	body, _ = io.ReadAll(w.Body)
+	err = json.Unmarshal(body, &resp)
+	assert.Nil(err)
+	assert.Equal(RespSuccess, resp.Code)
+}
+
+func TestGroupDetail_InvalidId(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/group/detail?id=0", nil)
+	GroupDetail(w, r)
+	body, _ := io.ReadAll(w.Body)
+	var resp Resp
+	err := json.Unmarshal(body, &resp)
+	assert.Nil(err)
+	assert.Equal(RespParamErr, resp.Code)
+}
+
+func TestGroupDel_InvalidId(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/group/del?id=0", nil)
+	GroupDel(w, r)
+	body, _ := io.ReadAll(w.Body)
+	var resp Resp
+	err := json.Unmarshal(body, &resp)
+	assert.Nil(err)
+	assert.Equal(RespParamErr, resp.Code)
+}
+
+// ========== User CRUD Tests ==========
+
+func TestUserCRUD(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+	base.Cfg.EncryptionPassword = false
+
+	// Create user
+	userJSON := `{"username":"testuser","pin_code":"Test@1234","groups":["all"],"status":1}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/user/set", bytes.NewReader([]byte(userJSON)))
+	r.Header.Set("Content-Type", "application/json")
+	UserSet(w, r)
+	body, _ := io.ReadAll(w.Body)
+	var resp Resp
+	err := json.Unmarshal(body, &resp)
+	assert.Nil(err)
+	assert.Equal(RespSuccess, resp.Code, "UserSet failed: %s", resp.Msg)
+
+	// List users
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodGet, "/user/list", nil)
+	UserList(w, r)
+	body, _ = io.ReadAll(w.Body)
+	err = json.Unmarshal(body, &resp)
+	assert.Nil(err)
+	assert.Equal(RespSuccess, resp.Code)
+	dataMap, ok := resp.Data.(map[string]interface{})
+	assert.True(ok)
+	userCount := dataMap["count"].(float64)
+	assert.True(userCount > 0)
+
+	// Search users with prefix
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodGet, "/user/list?prefix=test", nil)
+	UserList(w, r)
+	body, _ = io.ReadAll(w.Body)
+	err = json.Unmarshal(body, &resp)
+	assert.Nil(err)
+	assert.Equal(RespSuccess, resp.Code)
+	dataMap, ok = resp.Data.(map[string]interface{})
+	assert.True(ok)
+	searchCount := dataMap["count"].(float64)
+	assert.True(searchCount > 0)
+
+	// Delete user by looking up its actual ID
+	var createdUser dbdata.User
+	err = dbdata.One("Username", "testuser", &createdUser)
+	assert.Nil(err)
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/user/del?id=%d", createdUser.Id), nil)
+	UserDel(w, r)
+	body, _ = io.ReadAll(w.Body)
+	err = json.Unmarshal(body, &resp)
+	assert.Nil(err)
+	assert.Equal(RespSuccess, resp.Code)
+}
+
+func TestUserDetail_InvalidId(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/user/detail?id=0", nil)
+	UserDetail(w, r)
+	body, _ := io.ReadAll(w.Body)
+	var resp Resp
+	err := json.Unmarshal(body, &resp)
+	assert.Nil(err)
+	assert.Equal(RespParamErr, resp.Code)
+}
+
+func TestUserDel_InvalidId(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/user/del?id=0", nil)
+	UserDel(w, r)
+	body, _ := io.ReadAll(w.Body)
+	var resp Resp
+	err := json.Unmarshal(body, &resp)
+	assert.Nil(err)
+	assert.Equal(RespParamErr, resp.Code)
+}
+
+// ========== Policy CRUD Tests ==========
+
+func TestPolicyCRUD(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	// Create policy
+	policyJSON := `{"username":"testpolicy","status":1,"client_dns":[{"val":"8.8.8.8"}],"route_include":[{"val":"192.168.0.0/16"}]}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/policy/set", bytes.NewReader([]byte(policyJSON)))
+	r.Header.Set("Content-Type", "application/json")
+	PolicySet(w, r)
+	body, _ := io.ReadAll(w.Body)
+	var resp Resp
+	err := json.Unmarshal(body, &resp)
+	assert.Nil(err)
+	assert.Equal(RespSuccess, resp.Code, "PolicySet failed: %s", resp.Msg)
+
+	// List policies
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodGet, "/policy/list", nil)
+	PolicyList(w, r)
+	body, _ = io.ReadAll(w.Body)
+	err = json.Unmarshal(body, &resp)
+	assert.Nil(err)
+	assert.Equal(RespSuccess, resp.Code)
+	dataMap, ok := resp.Data.(map[string]interface{})
+	assert.True(ok)
+	policyCount := dataMap["count"].(float64)
+	assert.True(policyCount > 0)
+
+	// Get policy detail (id=1)
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodGet, "/policy/detail?id=1", nil)
+	PolicyDetail(w, r)
+	body, _ = io.ReadAll(w.Body)
+	err = json.Unmarshal(body, &resp)
+	assert.Nil(err)
+	assert.Equal(RespSuccess, resp.Code)
+
+	// Delete policy (id=1)
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodPost, "/policy/del?id=1", nil)
+	PolicyDel(w, r)
+	body, _ = io.ReadAll(w.Body)
+	err = json.Unmarshal(body, &resp)
+	assert.Nil(err)
+	assert.Equal(RespSuccess, resp.Code)
+}
+
+func TestPolicyDetail_InvalidId(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/policy/detail?id=0", nil)
+	PolicyDetail(w, r)
+	body, _ := io.ReadAll(w.Body)
+	var resp Resp
+	err := json.Unmarshal(body, &resp)
+	assert.Nil(err)
+	assert.Equal(RespParamErr, resp.Code)
+}
+
+func TestPolicyDel_InvalidId(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/policy/del?id=0", nil)
+	PolicyDel(w, r)
+	body, _ := io.ReadAll(w.Body)
+	var resp Resp
+	err := json.Unmarshal(body, &resp)
+	assert.Nil(err)
+	assert.Equal(RespParamErr, resp.Code)
+}
+
+// ========== Health/Metrics Tests ==========
+
+func TestHealthCheck(t *testing.T) {
+	assert := assert.New(t)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/health", nil)
+	HealthCheck(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+
+	body, _ := io.ReadAll(w.Body)
+	var result map[string]interface{}
+	err := json.Unmarshal(body, &result)
+	assert.Nil(err)
+	assert.Equal("ok", result["status"])
+}
+
+func TestMetrics(t *testing.T) {
+	assert := assert.New(t)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	Metrics(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+
+	body, _ := io.ReadAll(w.Body)
+	var result map[string]interface{}
+	err := json.Unmarshal(body, &result)
+	assert.Nil(err)
+	assert.Contains(result, "uptime_seconds")
+	assert.Contains(result, "goroutines")
+	assert.Contains(result, "online_users")
+	assert.Contains(result, "memory_alloc_bytes")
+}
+
+func TestPrometheusMetrics(t *testing.T) {
+	assert := assert.New(t)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/prometheus", nil)
+	PrometheusMetrics(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+
+	body := w.Body.String()
+	assert.Contains(body, "anylink_uptime_seconds")
+	assert.Contains(body, "anylink_online_users")
+	assert.Contains(body, "anylink_goroutines")
+	assert.Contains(body, "anylink_memory_alloc_bytes")
+}
+
+// ========== SetHome Test ==========
+
+func TestSetHome(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/set/home", nil)
+	SetHome(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+
+	body, _ := io.ReadAll(w.Body)
+	var resp Resp
+	err := json.Unmarshal(body, &resp)
+	assert.Nil(err)
+	assert.Equal(RespSuccess, resp.Code)
+	dataMap, ok := resp.Data.(map[string]interface{})
+	assert.True(ok)
+	assert.Contains(dataMap, "counts")
+}
+
+// ========== Portal Login Tests ==========
+
+func TestUserPortalLogin_Success(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+	base.Cfg.JwtSecret = "test_portal_jwt_secret"
+	base.Cfg.EncryptionPassword = false
+
+	// Create a user directly in DB
+	user := &dbdata.User{
+		Username: "portaluser",
+		PinCode:  "Portal@123",
+		Groups:   []string{"all"},
+		Status:   1,
+	}
+	err := dbdata.SetUser(user)
+	assert.Nil(err)
+
+	// Login
+	loginJSON := `{"username":"portaluser","password":"Portal@123","group":"all"}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/user/portal/login", bytes.NewReader([]byte(loginJSON)))
+	r.Header.Set("Content-Type", "application/json")
+	UserPortalLogin(w, r)
+	body, _ := io.ReadAll(w.Body)
+	var resp Resp
+	err = json.Unmarshal(body, &resp)
+	assert.Nil(err)
+	assert.Equal(RespSuccess, resp.Code, "portal login failed: %s", resp.Msg)
+	dataMap, ok := resp.Data.(map[string]interface{})
+	assert.True(ok)
+	assert.NotEmpty(dataMap["token"])
+}
+
+func TestUserPortalLogin_WrongPassword(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+	base.Cfg.JwtSecret = "test_portal_jwt_secret"
+	base.Cfg.EncryptionPassword = false
+
+	user := &dbdata.User{
+		Username: "portaluser2",
+		PinCode:  "Portal@123",
+		Groups:   []string{"all"},
+		Status:   1,
+	}
+	err := dbdata.SetUser(user)
+	assert.Nil(err)
+
+	loginJSON := `{"username":"portaluser2","password":"wrongpassword","group":"all"}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/user/portal/login", bytes.NewReader([]byte(loginJSON)))
+	r.Header.Set("Content-Type", "application/json")
+	UserPortalLogin(w, r)
+	body, _ := io.ReadAll(w.Body)
+	var resp Resp
+	err = json.Unmarshal(body, &resp)
+	assert.Nil(err)
+	assert.Equal(RespUserOrPassErr, resp.Code)
+}
+
+func TestUserPortalLogin_NonExistentUser(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+	base.Cfg.JwtSecret = "test_portal_jwt_secret"
+
+	loginJSON := `{"username":"nonexistent","password":"somepass","group":"all"}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/user/portal/login", bytes.NewReader([]byte(loginJSON)))
+	r.Header.Set("Content-Type", "application/json")
+	UserPortalLogin(w, r)
+	body, _ := io.ReadAll(w.Body)
+	var resp Resp
+	err := json.Unmarshal(body, &resp)
+	assert.Nil(err)
+	assert.Equal(RespUserOrPassErr, resp.Code)
+}
+
+// ========== Portal Middleware Tests ==========
+
+func TestPortalAuthMiddleware_NoToken(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	base.Cfg.JwtSecret = "test_portal_middleware_secret"
+
+	handler := portalAuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+	}))
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/portal/protected", nil)
+	handler.ServeHTTP(w, r)
+	assert.Equal(http.StatusUnauthorized, w.Code)
+}
+
+func TestPortalAuthMiddleware_ValidToken(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	base.Cfg.JwtSecret = "test_portal_middleware_secret"
+
+	jwtData := map[string]interface{}{"portal_user": "testuser"}
+	expiresAt := time.Now().Add(time.Hour).Unix()
+	token, err := SetJwtData(jwtData, expiresAt)
+	assert.Nil(err)
+
+	handler := portalAuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+	}))
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/portal/protected", nil)
+	r.Header.Set("Jwt", token)
+	handler.ServeHTTP(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+}
+
+// ========== Portal Password Policy Test ==========
+
+func TestPortalGetPasswordPolicy(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/portal/password_policy", nil)
+	UserPortalGetPasswordPolicy(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+
+	body, _ := io.ReadAll(w.Body)
+	var resp Resp
+	err := json.Unmarshal(body, &resp)
+	assert.Nil(err)
+	assert.Equal(RespSuccess, resp.Code)
 }
