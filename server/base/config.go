@@ -1,5 +1,7 @@
 package base
 
+import "strings"
+
 const (
 	cfgStr = iota
 	cfgInt
@@ -94,3 +96,9 @@ var configs = []config{
 }
 
 var envs = map[string]string{}
+
+func init() {
+	for _, c := range configs {
+		envs[c.Name] = "LINK_" + strings.ToUpper(c.Name)
+	}
+}
