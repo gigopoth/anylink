@@ -380,7 +380,7 @@ func TestCloseSessRemovesSession(t *testing.T) {
 	tmp := t.TempDir()
 	preData(tmp)
 	defer cleardata(tmp)
-	time.Sleep(time.Second * 10)
+	time.Sleep(time.Millisecond * 200)
 
 	sess := NewSession("")
 	sess.Username = "user-close"
@@ -408,7 +408,7 @@ func TestCloseSessWithoutCSess(t *testing.T) {
 	tmp := t.TempDir()
 	preData(tmp)
 	defer cleardata(tmp)
-	time.Sleep(time.Second * 10)
+	time.Sleep(time.Millisecond * 200)
 
 	sess := NewSession("")
 	sess.Username = "user-nocsess"
@@ -437,7 +437,7 @@ func TestCloseCSessWithCSess(t *testing.T) {
 	tmp := t.TempDir()
 	preData(tmp)
 	defer cleardata(tmp)
-	time.Sleep(time.Second * 10)
+	time.Sleep(time.Millisecond * 200)
 
 	sess := NewSession("")
 	sess.Username = "user-cclose"
