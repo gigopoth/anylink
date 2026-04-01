@@ -1474,3 +1474,804 @@ func TestUserPortalResetOtp_WrongPassword(t *testing.T) {
 	resp := parseResp(t, w)
 	assert.Equal(RespUserOrPassErr, resp.Code)
 }
+
+// ========== IP Map Tests ==========
+
+func TestUserIpMapCRUD(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	// Create
+	ipMap := dbdata.IpMap{IpAddr: "192.168.1.100", MacAddr: "00:11:22:33:44:55", Username: "testuser"}
+	body, _ := json.Marshal(ipMap)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/ip_map/set", bytes.NewReader(body))
+	UserIpMapSet(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+	resp := parseResp(t, w)
+	assert.Equal(RespSuccess, resp.Code)
+
+	// List
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodGet, "/ip_map/list?page=1", nil)
+	UserIpMapList(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+	resp = parseResp(t, w)
+	assert.Equal(RespSuccess, resp.Code)
+	dataMap := resp.Data.(map[string]interface{})
+	assert.Equal(float64(1), dataMap["count"].(float64))
+
+	// Detail
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodGet, "/ip_map/detail?id=1", nil)
+	UserIpMapDetail(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+	resp = parseResp(t, w)
+	assert.Equal(RespSuccess, resp.Code)
+
+	// Delete
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodPost, "/ip_map/del?id=1", nil)
+	UserIpMapDel(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+	resp = parseResp(t, w)
+	assert.Equal(RespSuccess, resp.Code)
+
+	// Verify deleted
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodGet, "/ip_map/list?page=1", nil)
+	UserIpMapList(w, r)
+	resp = parseResp(t, w)
+	dataMap = resp.Data.(map[string]interface{})
+	assert.Equal(float64(0), dataMap["count"].(float64))
+}
+
+func TestUserIpMapList_DefaultPage(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/ip_map/list", nil)
+	UserIpMapList(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+	resp := parseResp(t, w)
+	assert.Equal(RespSuccess, resp.Code)
+}
+
+func TestUserIpMapDetail_InvalidId(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/ip_map/detail?id=0", nil)
+	UserIpMapDetail(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+	resp := parseResp(t, w)
+	assert.Equal(RespParamErr, resp.Code)
+}
+
+func TestUserIpMapDetail_NotFound(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/ip_map/detail?id=999", nil)
+	UserIpMapDetail(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+	resp := parseResp(t, w)
+	assert.Equal(RespInternalErr, resp.Code)
+}
+
+func TestUserIpMapDel_InvalidId(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/ip_map/del?id=0", nil)
+	UserIpMapDel(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+	resp := parseResp(t, w)
+	assert.Equal(RespParamErr, resp.Code)
+}
+
+func TestUserIpMapDel_NotFound(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/ip_map/del?id=999", nil)
+	UserIpMapDel(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+	resp := parseResp(t, w)
+	assert.Equal(RespInternalErr, resp.Code)
+}
+
+func TestUserIpMapSet_InvalidBody(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/ip_map/set", strings.NewReader("not json"))
+	UserIpMapSet(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+	resp := parseResp(t, w)
+	assert.Equal(RespInternalErr, resp.Code)
+}
+
+func TestUserIpMapSet_ValidationError(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	ipMap := dbdata.IpMap{IpAddr: "1", MacAddr: "ab"}
+	body, _ := json.Marshal(ipMap)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/ip_map/set", bytes.NewReader(body))
+	UserIpMapSet(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+	resp := parseResp(t, w)
+	assert.Equal(RespInternalErr, resp.Code)
+}
+
+// ========== StatsInfo Tests ==========
+
+func TestStatsInfoList_InvalidAction(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/statsinfo/list?action=invalid&scope=rt", nil)
+	StatsInfoList(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+	resp := parseResp(t, w)
+	assert.Equal(RespParamErr, resp.Code)
+}
+
+func TestStatsInfoList_InvalidScope(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/statsinfo/list?action=online&scope=invalid", nil)
+	StatsInfoList(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+	resp := parseResp(t, w)
+	assert.Equal(RespParamErr, resp.Code)
+}
+
+func TestStatsInfoList_Valid(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/statsinfo/list?action=online&scope=rt", nil)
+	StatsInfoList(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+	resp := parseResp(t, w)
+	assert.Equal(RespSuccess, resp.Code)
+}
+
+// ========== SetSoft and decimal Tests ==========
+
+func TestSetSoft(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/set/soft", nil)
+	SetSoft(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+	resp := parseResp(t, w)
+	assert.Equal(RespSuccess, resp.Code)
+	assert.NotNil(resp.Data)
+}
+
+func TestDecimal(t *testing.T) {
+	assert := assert.New(t)
+	assert.Equal(1.23, decimal(1.2345))
+	assert.Equal(0.0, decimal(0.0))
+	assert.Equal(99.99, decimal(99.999))
+	assert.Equal(-1.23, decimal(-1.2399))
+}
+
+// ========== Settings Tests ==========
+
+func TestSetOther(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/set/other", nil)
+	SetOther(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+	resp := parseResp(t, w)
+	assert.Equal(RespSuccess, resp.Code)
+}
+
+func TestSetOtherEdit(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	data := dbdata.SettingOther{LinkAddr: "https://example.com", Banner: "test banner"}
+	body, _ := json.Marshal(data)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/set/other/edit", bytes.NewReader(body))
+	SetOtherEdit(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+	resp := parseResp(t, w)
+	assert.Equal(RespSuccess, resp.Code)
+
+	// Verify saved
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodGet, "/set/other", nil)
+	SetOther(w, r)
+	resp = parseResp(t, w)
+	assert.Equal(RespSuccess, resp.Code)
+}
+
+func TestSetOtherEdit_InvalidBody(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/set/other/edit", strings.NewReader("bad json"))
+	SetOtherEdit(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+	resp := parseResp(t, w)
+	assert.Equal(RespInternalErr, resp.Code)
+}
+
+func TestSetOtherSmtpEdit(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	data := dbdata.SettingSmtp{Host: "smtp.example.com", Port: 587, Username: "user@example.com", Password: "secret"}
+	body, _ := json.Marshal(data)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/set/other/smtp/edit", bytes.NewReader(body))
+	SetOtherSmtpEdit(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+	resp := parseResp(t, w)
+	assert.Equal(RespSuccess, resp.Code)
+}
+
+func TestSetOtherSmtpEdit_EmptyPassword(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	// First set with password
+	data := dbdata.SettingSmtp{Host: "smtp.example.com", Port: 587, Password: "secret123"}
+	body, _ := json.Marshal(data)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/set/other/smtp/edit", bytes.NewReader(body))
+	SetOtherSmtpEdit(w, r)
+	assert.Equal(RespSuccess, parseResp(t, w).Code)
+
+	// Edit with empty password (should preserve old)
+	data2 := dbdata.SettingSmtp{Host: "smtp2.example.com", Port: 465, Password: ""}
+	body2, _ := json.Marshal(data2)
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest(http.MethodPost, "/set/other/smtp/edit", bytes.NewReader(body2))
+	SetOtherSmtpEdit(w, r)
+	assert.Equal(RespSuccess, parseResp(t, w).Code)
+}
+
+func TestSetOtherSmtp_Get(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/set/other/smtp", nil)
+	SetOtherSmtp(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+	resp := parseResp(t, w)
+	assert.Equal(RespSuccess, resp.Code)
+}
+
+// ========== GroupAuthLogin Tests ==========
+
+func TestGroupAuthLogin_InvalidBody(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/group/auth/login", strings.NewReader("bad json"))
+	GroupAuthLogin(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+	resp := parseResp(t, w)
+	assert.Equal(RespInternalErr, resp.Code)
+}
+
+func TestGroupAuthLogin_UnknownAuthType(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	data := map[string]interface{}{
+		"name": "testuser",
+		"pwd":  "testpwd",
+		"auth": map[string]interface{}{"type": "unknown_auth"},
+	}
+	body, _ := json.Marshal(data)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/group/auth/login", bytes.NewReader(body))
+	GroupAuthLogin(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+	resp := parseResp(t, w)
+	assert.Equal(RespInternalErr, resp.Code)
+}
+
+func TestGroupAuthLogin_LocalAuth(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	data := map[string]interface{}{
+		"name": "testuser",
+		"pwd":  "testpwd",
+		"auth": map[string]interface{}{"type": "local"},
+	}
+	body, _ := json.Marshal(data)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/group/auth/login", bytes.NewReader(body))
+	GroupAuthLogin(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+	resp := parseResp(t, w)
+	assert.Equal(RespInternalErr, resp.Code)
+}
+
+// ========== Audit Tests ==========
+
+func TestSetAuditExport_Empty(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/set/audit/export", nil)
+	SetAuditExport(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+	resp := parseResp(t, w)
+	assert.Equal(RespParamErr, resp.Code)
+}
+
+// ========== Online/Offline/Reline Tests ==========
+
+func TestUserOnline_Empty(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/user/online?search_cate=username&search_text=&show_sleeper=false", nil)
+	UserOnline(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+	resp := parseResp(t, w)
+	assert.Equal(RespSuccess, resp.Code)
+	dataMap := resp.Data.(map[string]interface{})
+	assert.Equal(float64(0), dataMap["count"].(float64))
+}
+
+func TestUserOffline_NonExistentToken(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/user/offline?token=nonexistent", nil)
+	UserOffline(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+	resp := parseResp(t, w)
+	assert.Equal(RespSuccess, resp.Code)
+}
+
+func TestUserReline_NonExistentToken(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/user/reline?token=nonexistent", nil)
+	UserReline(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+	resp := parseResp(t, w)
+	assert.Equal(RespSuccess, resp.Code)
+}
+
+// ========== AuditLog Settings Tests ==========
+
+func TestSetOtherAuditLogEdit_ValidData(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	data := map[string]interface{}{"life_day": 30, "clear_time": "3:00"}
+	body, _ := json.Marshal(data)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/set/other/audit_log/edit", bytes.NewReader(body))
+	SetOtherAuditLogEdit(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+	resp := parseResp(t, w)
+	assert.Equal(RespSuccess, resp.Code)
+}
+
+func TestSetOtherAuditLogEdit_InvalidBody(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/set/other/audit_log/edit", strings.NewReader("bad"))
+	SetOtherAuditLogEdit(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+	resp := parseResp(t, w)
+	assert.Equal(RespInternalErr, resp.Code)
+}
+
+// ========== Password Policy Tests ==========
+
+func TestSetPasswordPolicyEdit_ValidData(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	data := map[string]interface{}{"min_length": 8, "max_length": 64, "require_uppercase": true}
+	body, _ := json.Marshal(data)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/set/password_policy/edit", bytes.NewReader(body))
+	SetPasswordPolicyEdit(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+	resp := parseResp(t, w)
+	assert.Equal(RespSuccess, resp.Code)
+}
+
+func TestSetPasswordPolicyEdit_MinGreaterThanMax(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	data := map[string]interface{}{"min_length": 100, "max_length": 10}
+	body, _ := json.Marshal(data)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/set/password_policy/edit", bytes.NewReader(body))
+	SetPasswordPolicyEdit(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+	resp := parseResp(t, w)
+	assert.Equal(RespParamErr, resp.Code)
+}
+
+func TestSetPasswordPolicyEdit_InvalidBody(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/set/password_policy/edit", strings.NewReader("bad"))
+	SetPasswordPolicyEdit(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+	resp := parseResp(t, w)
+	assert.Equal(RespInternalErr, resp.Code)
+}
+
+// ========== SetSystem Test ==========
+
+func TestSetSystem(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/set/system", nil)
+	SetSystem(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+	resp := parseResp(t, w)
+	assert.Equal(RespSuccess, resp.Code)
+	dataMap := resp.Data.(map[string]interface{})
+	assert.Contains(dataMap, "mem")
+	assert.Contains(dataMap, "disk")
+	assert.Contains(dataMap, "cpu")
+	assert.Contains(dataMap, "sys")
+}
+
+// ========== PolicySet Tests ==========
+
+func TestPolicySet_InvalidBody(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/policy/set", strings.NewReader("bad json"))
+	PolicySet(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+	resp := parseResp(t, w)
+	assert.Equal(RespInternalErr, resp.Code)
+}
+
+func TestPolicySet_Valid(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	policy := dbdata.Policy{Username: "policyuser", Status: 1}
+	body, _ := json.Marshal(policy)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/policy/set", bytes.NewReader(body))
+	PolicySet(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+}
+
+// ========== LockManager Tests ==========
+
+func TestCheckGlobalIPLock_NotLocked(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	lm := GetLockManager()
+	locked := lm.CheckGlobalIPLock("10.0.0.1", time.Now())
+	assert.False(locked)
+}
+
+func TestCheckGlobalUserLock_NotLocked(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	lm := GetLockManager()
+	locked := lm.CheckGlobalUserLock("nonexistent", time.Now())
+	assert.False(locked)
+}
+
+func TestCheckGlobalUserLock_EmptyUsername(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	lm := GetLockManager()
+	locked := lm.CheckGlobalUserLock("", time.Now())
+	assert.False(locked)
+}
+
+func TestCheckLockState_NilState(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	lm := GetLockManager()
+	locked := lm.CheckLockState(nil, time.Now(), 300)
+	assert.False(locked)
+}
+
+func TestCheckLockState_Locked(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	lm := GetLockManager()
+
+	state := &LockState{
+		Locked:       true,
+		FailureCount: 5,
+		LastAttempt:  time.Now(),
+		LockTime:     time.Now().Add(10 * time.Minute),
+	}
+	locked := lm.CheckLockState(state, time.Now(), 300)
+	assert.True(locked)
+}
+
+func TestCheckLockState_Expired(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	lm := GetLockManager()
+
+	state := &LockState{
+		Locked:       true,
+		FailureCount: 5,
+		LastAttempt:  time.Now().Add(-10 * time.Minute),
+		LockTime:     time.Now().Add(-1 * time.Minute),
+	}
+	locked := lm.CheckLockState(state, time.Now(), 300)
+	assert.False(locked)
+}
+
+func TestCheckLockState_WindowExpired(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	lm := GetLockManager()
+
+	state := &LockState{
+		Locked:       false,
+		FailureCount: 3,
+		LastAttempt:  time.Now().Add(-10 * time.Minute),
+	}
+	locked := lm.CheckLockState(state, time.Now(), 60)
+	assert.False(locked)
+	assert.Equal(0, state.FailureCount)
+}
+
+// ========== RespData Test ==========
+
+func TestRespData(t *testing.T) {
+	assert := assert.New(t)
+	w := httptest.NewRecorder()
+	RespData(w, map[string]string{"key": "value"}, nil)
+	assert.Equal(http.StatusOK, w.Code)
+}
+
+// ========== checkResetRateLimit Tests ==========
+
+func TestCheckResetRateLimit(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+
+	ok := checkResetRateLimit("192.168.99.1")
+	assert.True(ok)
+
+	ok = checkResetRateLimit("192.168.99.1")
+	assert.True(ok)
+}
+
+// ========== GetCertSetting Test ==========
+
+func TestGetCertSetting(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/cert/setting", nil)
+	GetCertSetting(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+}
+
+// ========== UserOtpQr Test ==========
+
+func TestUserOtpQr_InvalidId(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/user/otp_qr?id=999&b64=0", nil)
+	UserOtpQr(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+}
+
+func TestUserOtpQr_B64Mode(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/user/otp_qr?id=999&b64=1", nil)
+	UserOtpQr(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+}
+
+func TestPolicySet_EmptyUsername(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	policy := dbdata.Policy{Username: "", Status: 1}
+	body, _ := json.Marshal(policy)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/policy/set", bytes.NewReader(body))
+	PolicySet(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+	resp := parseResp(t, w)
+	assert.Equal(RespInternalErr, resp.Code)
+}
+
+func TestSetAuditList_WithSearch(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	search := `{"username":"test","sort":1}`
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/set/audit/list?page=1&search="+url.QueryEscape(search), nil)
+	SetAuditList(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+	resp := parseResp(t, w)
+	assert.Equal(RespSuccess, resp.Code)
+}
+
+func TestSetAuditExport_WithSearch(t *testing.T) {
+	assert := assert.New(t)
+	base.Test()
+	cleanup := setupTestDB(t)
+	defer cleanup()
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/set/audit/export?search="+url.QueryEscape(`{"username":"nobody"}`), nil)
+	SetAuditExport(w, r)
+	assert.Equal(http.StatusOK, w.Code)
+	resp := parseResp(t, w)
+	assert.Equal(RespParamErr, resp.Code)
+}
+
+// ========== CleanupExpiredLocks Test ==========
+
+func TestCleanupExpiredLocks(t *testing.T) {
+	base.Test()
+	base.Cfg.GlobalLockStateExpirationTime = 1
+	base.Cfg.GlobalIPBanResetTime = 1
+	base.Cfg.GlobalUserBanResetTime = 1
+	base.Cfg.BanResetTime = 1
+	lm := GetLockManager()
+	lm.CleanupExpiredLocks()
+}
+
+// ========== InitLockManager Test ==========
+
+func TestInitLockManager_Disabled(t *testing.T) {
+	base.Test()
+	base.Cfg.AntiBruteForce = false
+	InitLockManager()
+}
+
+// ========== InitIPWhitelist Test ==========
+
+func TestInitIPWhitelist_Empty(t *testing.T) {
+	base.Test()
+	base.Cfg.IPWhitelist = ""
+	lm := GetLockManager()
+	lm.InitIPWhitelist()
+}
+
+// ========== location Test ==========
+
+func TestLocation(t *testing.T) {
+	assert := assert.New(t)
+	handler := location("/test")
+	assert.NotNil(handler)
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	handler(w, r)
+	assert.Equal(http.StatusFound, w.Code)
+	assert.Equal("/test", w.Header().Get("Location"))
+}
